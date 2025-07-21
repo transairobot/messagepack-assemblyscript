@@ -1,0 +1,1 @@
+read steering files in .kiro/steering and specs files in .kiro/specs/messagepack-assemblyscript, finish task 9.2
