@@ -7,6 +7,8 @@ import {
   MessagePackFloat,
   MessagePackString,
   MessagePackBinary,
+  MessagePackArray,
+  MessagePackMap,
   MessagePackValueType
 } from "./types";
 
@@ -730,6 +732,14 @@ export function runDecoderTests(): boolean {
   allPassed = testDecodeBin32() && allPassed;
   allPassed = testDecodeEmptyBinary() && allPassed;
   allPassed = testDecodeBinaryPatterns() && allPassed;
+  allPassed = testDecodeFixarray() && allPassed;
+  allPassed = testDecodeArray16() && allPassed;
+  allPassed = testDecodeArray32() && allPassed;
+  allPassed = testDecodeNestedArrays() && allPassed;
+  allPassed = testDecodeFixmap() && allPassed;
+  allPassed = testDecodeMap16() && allPassed;
+  allPassed = testDecodeMap32() && allPassed;
+  allPassed = testDecodeNestedMaps() && allPassed;
   allPassed = testDecodeEmptyBuffer() && allPassed;
   allPassed = testDecodeUnsupportedFormat() && allPassed;
   
@@ -756,5 +766,571 @@ export function testDecodeEmptyBuffer(): boolean {
  */
 export function testDecodeUnsupportedFormat(): boolean {
   console.log("SKIP: testDecodeUnsupportedFormat - AssemblyScript doesn't support try-catch");
+  return true;
+}
+/**
+ * Test fixarray format decoding (0x90 - 0x9f)
+ */
+export function testDecodeFixarray(): boolean {
+  // Test empty array
+  let buffer = new Uint8Array(1);
+  buffer[0] = 0x90; // fixarray with length 0
+  
+  let decoder = new MessagePackDecoder(buffer);
+  let result = decoder.decode();
+  
+  if (result.getType() !== MessagePackValueType.ARRAY) {
+    console.log("FAIL: Expected ARRAY type for empty fixarray, got " + result.getType().toString());
+    return false;
+  }
+  
+  let arrayResult = result as MessagePackArray;
+  if (arrayResult.value.length !== 0) {
+    console.log("FAIL: Expected empty array, got length " + arrayResult.value.length.toString());
+    return false;
+  }
+  
+  // Test small array with mixed types
+  buffer = new Uint8Array(6);
+  buffer[0] = 0x93; // fixarray with length 3
+  buffer[1] = 0xc0; // nil
+  buffer[2] = 0xc3; // true
+  buffer[3] = 0x01; // positive fixint 1
+  
+  decoder = new MessagePackDecoder(buffer);
+  result = decoder.decode();
+  
+  if (result.getType() !== MessagePackValueType.ARRAY) {
+    console.log("FAIL: Expected ARRAY type for fixarray, got " + result.getType().toString());
+    return false;
+  }
+  
+  arrayResult = result as MessagePackArray;
+  if (arrayResult.value.length !== 3) {
+    console.log("FAIL: Expected array length 3, got " + arrayResult.value.length.toString());
+    return false;
+  }
+  
+  // Check array elements
+  if (arrayResult.value[0].getType() !== MessagePackValueType.NULL) {
+    console.log("FAIL: Expected NULL type for first element, got " + arrayResult.value[0].getType().toString());
+    return false;
+  }
+  
+  if (arrayResult.value[1].getType() !== MessagePackValueType.BOOLEAN) {
+    console.log("FAIL: Expected BOOLEAN type for second element, got " + arrayResult.value[1].getType().toString());
+    return false;
+  }
+  
+  const boolElement = arrayResult.value[1] as MessagePackBoolean;
+  if (boolElement.value !== true) {
+    console.log("FAIL: Expected true for second element, got " + boolElement.value.toString());
+    return false;
+  }
+  
+  if (arrayResult.value[2].getType() !== MessagePackValueType.INTEGER) {
+    console.log("FAIL: Expected INTEGER type for third element, got " + arrayResult.value[2].getType().toString());
+    return false;
+  }
+  
+  const intElement = arrayResult.value[2] as MessagePackInteger;
+  if (intElement.value !== 1) {
+    console.log("FAIL: Expected 1 for third element, got " + intElement.value.toString());
+    return false;
+  }
+  
+  console.log("PASS: testDecodeFixarray");
+  return true;
+}
+
+/**
+ * Test array16 format decoding (0xdc)
+ */
+export function testDecodeArray16(): boolean {
+  // For testing purposes, we'll use a smaller array
+  // In a real scenario, this would be 16+ elements
+  const arraySize = 5;
+  const buffer = new Uint8Array(3 + arraySize);
+  buffer[0] = 0xdc; // array16 format
+  
+  // Write length as big-endian u16
+  buffer[1] = 0x00;
+  buffer[2] = arraySize;
+  
+  // Fill array with integers 0-4
+  for (let i = 0; i < arraySize; i++) {
+    buffer[3 + i] = i;
+  }
+  
+  const decoder = new MessagePackDecoder(buffer);
+  const result = decoder.decode();
+  
+  if (result.getType() !== MessagePackValueType.ARRAY) {
+    console.log("FAIL: Expected ARRAY type for array16, got " + result.getType().toString());
+    return false;
+  }
+  
+  const arrayResult = result as MessagePackArray;
+  if (arrayResult.value.length !== arraySize) {
+    console.log("FAIL: Expected array length " + arraySize.toString() + ", got " + arrayResult.value.length.toString());
+    return false;
+  }
+  
+  // Check array elements
+  for (let i = 0; i < arraySize; i++) {
+    if (arrayResult.value[i].getType() !== MessagePackValueType.INTEGER) {
+      console.log("FAIL: Expected INTEGER type for element " + i.toString() + ", got " + arrayResult.value[i].getType().toString());
+      return false;
+    }
+    
+    const intElement = arrayResult.value[i] as MessagePackInteger;
+    if (intElement.value !== i) {
+      console.log("FAIL: Expected " + i.toString() + " for element " + i.toString() + ", got " + intElement.value.toString());
+      return false;
+    }
+  }
+  
+  console.log("PASS: testDecodeArray16");
+  return true;
+}
+
+/**
+ * Test array32 format decoding (0xdd)
+ */
+export function testDecodeArray32(): boolean {
+  // For testing purposes, we'll use a smaller array
+  // In a real scenario, this would be 65536+ elements
+  const arraySize = 7;
+  const buffer = new Uint8Array(5 + arraySize);
+  buffer[0] = 0xdd; // array32 format
+  
+  // Write length as big-endian u32
+  buffer[1] = 0x00;
+  buffer[2] = 0x00;
+  buffer[3] = 0x00;
+  buffer[4] = arraySize;
+  
+  // Fill array with integers 0-6
+  for (let i = 0; i < arraySize; i++) {
+    buffer[5 + i] = i;
+  }
+  
+  const decoder = new MessagePackDecoder(buffer);
+  const result = decoder.decode();
+  
+  if (result.getType() !== MessagePackValueType.ARRAY) {
+    console.log("FAIL: Expected ARRAY type for array32, got " + result.getType().toString());
+    return false;
+  }
+  
+  const arrayResult = result as MessagePackArray;
+  if (arrayResult.value.length !== arraySize) {
+    console.log("FAIL: Expected array length " + arraySize.toString() + ", got " + arrayResult.value.length.toString());
+    return false;
+  }
+  
+  // Check array elements
+  for (let i = 0; i < arraySize; i++) {
+    if (arrayResult.value[i].getType() !== MessagePackValueType.INTEGER) {
+      console.log("FAIL: Expected INTEGER type for element " + i.toString() + ", got " + arrayResult.value[i].getType().toString());
+      return false;
+    }
+    
+    const intElement = arrayResult.value[i] as MessagePackInteger;
+    if (intElement.value !== i) {
+      console.log("FAIL: Expected " + i.toString() + " for element " + i.toString() + ", got " + intElement.value.toString());
+      return false;
+    }
+  }
+  
+  console.log("PASS: testDecodeArray32");
+  return true;
+}
+
+/**
+ * Test nested array decoding
+ */
+export function testDecodeNestedArrays(): boolean {
+  // Create a buffer for an array containing another array
+  // [1, [2, 3]]
+  const buffer = new Uint8Array(5);
+  buffer[0] = 0x92;       // fixarray with length 2
+  buffer[1] = 0x01;       // positive fixint 1
+  buffer[2] = 0x92;       // fixarray with length 2
+  buffer[3] = 0x02;       // positive fixint 2
+  buffer[4] = 0x03;       // positive fixint 3
+  
+  const decoder = new MessagePackDecoder(buffer);
+  const result = decoder.decode();
+  
+  if (result.getType() !== MessagePackValueType.ARRAY) {
+    console.log("FAIL: Expected ARRAY type for outer array, got " + result.getType().toString());
+    return false;
+  }
+  
+  const outerArray = result as MessagePackArray;
+  if (outerArray.value.length !== 2) {
+    console.log("FAIL: Expected outer array length 2, got " + outerArray.value.length.toString());
+    return false;
+  }
+  
+  // Check first element (integer 1)
+  if (outerArray.value[0].getType() !== MessagePackValueType.INTEGER) {
+    console.log("FAIL: Expected INTEGER type for first element, got " + outerArray.value[0].getType().toString());
+    return false;
+  }
+  
+  const firstElement = outerArray.value[0] as MessagePackInteger;
+  if (firstElement.value !== 1) {
+    console.log("FAIL: Expected 1 for first element, got " + firstElement.value.toString());
+    return false;
+  }
+  
+  // Check second element (inner array)
+  if (outerArray.value[1].getType() !== MessagePackValueType.ARRAY) {
+    console.log("FAIL: Expected ARRAY type for second element, got " + outerArray.value[1].getType().toString());
+    return false;
+  }
+  
+  const innerArray = outerArray.value[1] as MessagePackArray;
+  if (innerArray.value.length !== 2) {
+    console.log("FAIL: Expected inner array length 2, got " + innerArray.value.length.toString());
+    return false;
+  }
+  
+  // Check inner array elements
+  const innerFirst = innerArray.value[0] as MessagePackInteger;
+  if (innerFirst.value !== 2) {
+    console.log("FAIL: Expected 2 for inner array first element, got " + innerFirst.value.toString());
+    return false;
+  }
+  
+  const innerSecond = innerArray.value[1] as MessagePackInteger;
+  if (innerSecond.value !== 3) {
+    console.log("FAIL: Expected 3 for inner array second element, got " + innerSecond.value.toString());
+    return false;
+  }
+  
+  console.log("PASS: testDecodeNestedArrays");
+  return true;
+}/**
+
+ * Test fixmap format decoding (0x80 - 0x8f)
+ */
+export function testDecodeFixmap(): boolean {
+  // Test empty map
+  let buffer = new Uint8Array(1);
+  buffer[0] = 0x80; // fixmap with size 0
+  
+  let decoder = new MessagePackDecoder(buffer);
+  let result = decoder.decode();
+  
+  if (result.getType() !== MessagePackValueType.MAP) {
+    console.log("FAIL: Expected MAP type for empty fixmap, got " + result.getType().toString());
+    return false;
+  }
+  
+  let mapResult = result as MessagePackMap;
+  if (mapResult.value.size !== 0) {
+    console.log("FAIL: Expected empty map, got size " + mapResult.value.size.toString());
+    return false;
+  }
+  
+  // Test small map with string keys and mixed values
+  // {"a": 1, "b": true}
+  buffer = new Uint8Array(7);
+  buffer[0] = 0x82;       // fixmap with size 2
+  buffer[1] = 0xa1;       // fixstr with length 1
+  buffer[2] = 0x61;       // "a"
+  buffer[3] = 0x01;       // positive fixint 1
+  buffer[4] = 0xa1;       // fixstr with length 1
+  buffer[5] = 0x62;       // "b"
+  buffer[6] = 0xc3;       // true
+  
+  decoder = new MessagePackDecoder(buffer);
+  result = decoder.decode();
+  
+  if (result.getType() !== MessagePackValueType.MAP) {
+    console.log("FAIL: Expected MAP type for fixmap, got " + result.getType().toString());
+    return false;
+  }
+  
+  mapResult = result as MessagePackMap;
+  if (mapResult.value.size !== 2) {
+    console.log("FAIL: Expected map size 2, got " + mapResult.value.size.toString());
+    return false;
+  }
+  
+  // Check map entries
+  const value1 = mapResult.value.get("a");
+  if (!value1 || value1.getType() !== MessagePackValueType.INTEGER) {
+    console.log("FAIL: Expected INTEGER type for key 'a'");
+    return false;
+  }
+  
+  const intValue = value1 as MessagePackInteger;
+  if (intValue.value !== 1) {
+    console.log("FAIL: Expected 1 for key 'a', got " + intValue.value.toString());
+    return false;
+  }
+  
+  const value2 = mapResult.value.get("b");
+  if (!value2 || value2.getType() !== MessagePackValueType.BOOLEAN) {
+    console.log("FAIL: Expected BOOLEAN type for key 'b'");
+    return false;
+  }
+  
+  const boolValue = value2 as MessagePackBoolean;
+  if (boolValue.value !== true) {
+    console.log("FAIL: Expected true for key 'b', got " + boolValue.value.toString());
+    return false;
+  }
+  
+  console.log("PASS: testDecodeFixmap");
+  return true;
+}/**
+ *
+ Test map16 format decoding (0xde)
+ */
+export function testDecodeMap16(): boolean {
+  // For testing purposes, we'll use a smaller map
+  // In a real scenario, this would be 16+ key-value pairs
+  
+  // Create a buffer for a map with 3 entries
+  // {"key1": 1, "key2": 2, "key3": 3}
+  const buffer = new Uint8Array(21);
+  buffer[0] = 0xde;       // map16 format
+  buffer[1] = 0x00;       // high byte of size (0)
+  buffer[2] = 0x03;       // low byte of size (3)
+  
+  // Key 1: "key1"
+  buffer[3] = 0xa4;       // fixstr with length 4
+  buffer[4] = 0x6b;       // "k"
+  buffer[5] = 0x65;       // "e"
+  buffer[6] = 0x79;       // "y"
+  buffer[7] = 0x31;       // "1"
+  buffer[8] = 0x01;       // value: positive fixint 1
+  
+  // Key 2: "key2"
+  buffer[9] = 0xa4;       // fixstr with length 4
+  buffer[10] = 0x6b;      // "k"
+  buffer[11] = 0x65;      // "e"
+  buffer[12] = 0x79;      // "y"
+  buffer[13] = 0x32;      // "2"
+  buffer[14] = 0x02;      // value: positive fixint 2
+  
+  // Key 3: "key3"
+  buffer[15] = 0xa4;      // fixstr with length 4
+  buffer[16] = 0x6b;      // "k"
+  buffer[17] = 0x65;      // "e"
+  buffer[18] = 0x79;      // "y"
+  buffer[19] = 0x33;      // "3"
+  buffer[20] = 0x03;      // value: positive fixint 3
+  
+  const decoder = new MessagePackDecoder(buffer);
+  const result = decoder.decode();
+  
+  if (result.getType() !== MessagePackValueType.MAP) {
+    console.log("FAIL: Expected MAP type for map16, got " + result.getType().toString());
+    return false;
+  }
+  
+  const mapResult = result as MessagePackMap;
+  if (mapResult.value.size !== 3) {
+    console.log("FAIL: Expected map size 3, got " + mapResult.value.size.toString());
+    return false;
+  }
+  
+  // Check map entries
+  for (let i = 1; i <= 3; i++) {
+    const key = "key" + i.toString();
+    const value = mapResult.value.get(key);
+    
+    if (!value || value.getType() !== MessagePackValueType.INTEGER) {
+      console.log("FAIL: Expected INTEGER type for key '" + key + "'");
+      return false;
+    }
+    
+    const intValue = value as MessagePackInteger;
+    if (intValue.value !== i) {
+      console.log("FAIL: Expected " + i.toString() + " for key '" + key + "', got " + intValue.value.toString());
+      return false;
+    }
+  }
+  
+  console.log("PASS: testDecodeMap16");
+  return true;
+}/*
+*
+ * Test map32 format decoding (0xdf)
+ */
+export function testDecodeMap32(): boolean {
+  // For testing purposes, we'll use a smaller map
+  // In a real scenario, this would be 65536+ key-value pairs
+  
+  // Create a buffer for a map with 2 entries
+  // {"name": "MessagePack", "format": "binary"}
+  const buffer = new Uint8Array(36);
+  buffer[0] = 0xdf;       // map32 format
+  buffer[1] = 0x00;       // highest byte of size (0)
+  buffer[2] = 0x00;       // high byte of size (0)
+  buffer[3] = 0x00;       // low byte of size (0)
+  buffer[4] = 0x02;       // lowest byte of size (2)
+  
+  // Key 1: "name"
+  buffer[5] = 0xa4;       // fixstr with length 4
+  buffer[6] = 0x6e;       // "n"
+  buffer[7] = 0x61;       // "a"
+  buffer[8] = 0x6d;       // "m"
+  buffer[9] = 0x65;       // "e"
+  
+  // Value 1: "MessagePack"
+  buffer[10] = 0xab;      // fixstr with length 11
+  buffer[11] = 0x4d;      // "M"
+  buffer[12] = 0x65;      // "e"
+  buffer[13] = 0x73;      // "s"
+  buffer[14] = 0x73;      // "s"
+  buffer[15] = 0x61;      // "a"
+  buffer[16] = 0x67;      // "g"
+  buffer[17] = 0x65;      // "e"
+  buffer[18] = 0x50;      // "P"
+  buffer[19] = 0x61;      // "a"
+  buffer[20] = 0x63;      // "c"
+  buffer[21] = 0x6b;      // "k"
+  
+  // Key 2: "format"
+  buffer[22] = 0xa6;      // fixstr with length 6
+  buffer[23] = 0x66;      // "f"
+  buffer[24] = 0x6f;      // "o"
+  buffer[25] = 0x72;      // "r"
+  buffer[26] = 0x6d;      // "m"
+  buffer[27] = 0x61;      // "a"
+  buffer[28] = 0x74;      // "t"
+  
+  // Value 2: "binary"
+  buffer[29] = 0xa6;      // fixstr with length 6
+  buffer[30] = 0x62;      // "b"
+  buffer[31] = 0x69;      // "i"
+  buffer[32] = 0x6e;      // "n"
+  buffer[33] = 0x61;      // "a"
+  buffer[34] = 0x72;      // "r"
+  buffer[35] = 0x79;      // "y"
+  
+  const decoder = new MessagePackDecoder(buffer);
+  const result = decoder.decode();
+  
+  if (result.getType() !== MessagePackValueType.MAP) {
+    console.log("FAIL: Expected MAP type for map32, got " + result.getType().toString());
+    return false;
+  }
+  
+  const mapResult = result as MessagePackMap;
+  if (mapResult.value.size !== 2) {
+    console.log("FAIL: Expected map size 2, got " + mapResult.value.size.toString());
+    return false;
+  }
+  
+  // Check "name" entry
+  const nameValue = mapResult.value.get("name");
+  if (!nameValue || nameValue.getType() !== MessagePackValueType.STRING) {
+    console.log("FAIL: Expected STRING type for key 'name'");
+    return false;
+  }
+  
+  const nameStrValue = nameValue as MessagePackString;
+  if (nameStrValue.value !== "MessagePack") {
+    console.log("FAIL: Expected 'MessagePack' for key 'name', got '" + nameStrValue.value + "'");
+    return false;
+  }
+  
+  // Check "format" entry
+  const formatValue = mapResult.value.get("format");
+  if (!formatValue || formatValue.getType() !== MessagePackValueType.STRING) {
+    console.log("FAIL: Expected STRING type for key 'format'");
+    return false;
+  }
+  
+  const formatStrValue = formatValue as MessagePackString;
+  if (formatStrValue.value !== "binary") {
+    console.log("FAIL: Expected 'binary' for key 'format', got '" + formatStrValue.value + "'");
+    return false;
+  }
+  
+  console.log("PASS: testDecodeMap32");
+  return true;
+}
+
+/**
+ * Test nested map decoding
+ */
+export function testDecodeNestedMaps(): boolean {
+  // Create a buffer for a map containing another map
+  // {"outer": {"inner": 42}}
+  const buffer = new Uint8Array(15);
+  buffer[0] = 0x81;       // fixmap with size 1
+  
+  // Key: "outer"
+  buffer[1] = 0xa5;       // fixstr with length 5
+  buffer[2] = 0x6f;       // "o"
+  buffer[3] = 0x75;       // "u"
+  buffer[4] = 0x74;       // "t"
+  buffer[5] = 0x65;       // "e"
+  buffer[6] = 0x72;       // "r"
+  
+  // Value: inner map
+  buffer[7] = 0x81;       // fixmap with size 1
+  
+  // Inner key: "inner"
+  buffer[8] = 0xa5;       // fixstr with length 5
+  buffer[9] = 0x69;       // "i"
+  buffer[10] = 0x6e;      // "n"
+  buffer[11] = 0x6e;      // "n"
+  buffer[12] = 0x65;      // "e"
+  buffer[13] = 0x72;      // "r"
+  
+  // Inner value: 42
+  buffer[14] = 0x2a;      // positive fixint 42
+  
+  const decoder = new MessagePackDecoder(buffer);
+  const result = decoder.decode();
+  
+  if (result.getType() !== MessagePackValueType.MAP) {
+    console.log("FAIL: Expected MAP type for outer map, got " + result.getType().toString());
+    return false;
+  }
+  
+  const outerMap = result as MessagePackMap;
+  if (outerMap.value.size !== 1) {
+    console.log("FAIL: Expected outer map size 1, got " + outerMap.value.size.toString());
+    return false;
+  }
+  
+  // Check outer map entry
+  const innerMapValue = outerMap.value.get("outer");
+  if (!innerMapValue || innerMapValue.getType() !== MessagePackValueType.MAP) {
+    console.log("FAIL: Expected MAP type for key 'outer'");
+    return false;
+  }
+  
+  const innerMap = innerMapValue as MessagePackMap;
+  if (innerMap.value.size !== 1) {
+    console.log("FAIL: Expected inner map size 1, got " + innerMap.value.size.toString());
+    return false;
+  }
+  
+  // Check inner map entry
+  const innerValue = innerMap.value.get("inner");
+  if (!innerValue || innerValue.getType() !== MessagePackValueType.INTEGER) {
+    console.log("FAIL: Expected INTEGER type for key 'inner'");
+    return false;
+  }
+  
+  const intValue = innerValue as MessagePackInteger;
+  if (intValue.value !== 42) {
+    console.log("FAIL: Expected 42 for key 'inner', got " + intValue.value.toString());
+    return false;
+  }
+  
+  console.log("PASS: testDecodeNestedMaps");
   return true;
 }

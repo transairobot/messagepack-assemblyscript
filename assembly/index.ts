@@ -11,5 +11,3 @@ export * from "./encoder.test";
 export * from "./encoder.integration.test";
 export * from "./decoder.test";
 export * from "./decoder.integration.test";
-export * from "./decoder.test";
-export * from "./decoder.integration.test";

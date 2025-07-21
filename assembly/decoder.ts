@@ -1,13 +1,16 @@
 // MessagePack decoder implementation
-import { 
-  MessagePackValue, 
+import {
+  MessagePackValueType,
+  MessagePackValue,
   MessagePackDecodeError,
   MessagePackNull,
   MessagePackBoolean,
   MessagePackInteger,
   MessagePackFloat,
   MessagePackString,
-  MessagePackBinary
+  MessagePackBinary,
+  MessagePackArray,
+  MessagePackMap
 } from "./types";
 import { Format } from "./format";
 
@@ -17,12 +20,12 @@ import { Format } from "./format";
 export class MessagePackDecoder {
   private buffer: Uint8Array;
   private position: i32;
-  
+
   constructor(buffer: Uint8Array) {
     this.buffer = buffer;
     this.position = 0;
   }
-  
+
   /**
    * Main decoding method - converts binary MessagePack data to AssemblyScript values
    */
@@ -30,11 +33,11 @@ export class MessagePackDecoder {
     if (this.buffer.length === 0) {
       throw new MessagePackDecodeError("Empty buffer");
     }
-    
+
     this.position = 0;
     return this.decodeValue();
   }
-  
+
   /**
    * Decode a single value based on format byte
    */
@@ -42,91 +45,115 @@ export class MessagePackDecoder {
     if (!this.hasRemaining(1)) {
       throw new MessagePackDecodeError("Unexpected end of buffer");
     }
-    
+
     const formatByte = this.readUint8();
-    
+
     // Positive fixint (0x00 - 0x7f)
     if (formatByte <= Format.POSITIVE_FIXINT_MAX) {
       return new MessagePackInteger(formatByte as i64);
     }
-    
+
+    // fixmap (0x80 - 0x8f)
+    if (formatByte >= Format.FIXMAP_PREFIX && formatByte <= Format.FIXMAP_MAX) {
+      const mapSize = formatByte - Format.FIXMAP_PREFIX;
+      return new MessagePackMap(this.decodeMap(mapSize));
+    }
+
+    // fixarray (0x90 - 0x9f)
+    if (formatByte >= Format.FIXARRAY_PREFIX && formatByte <= Format.FIXARRAY_MAX) {
+      const arrayLength = formatByte - Format.FIXARRAY_PREFIX;
+      return new MessagePackArray(this.decodeArray(arrayLength));
+    }
+
     // fixstr (0xa0 - 0xbf)
     if (formatByte >= Format.FIXSTR_PREFIX && formatByte <= Format.FIXSTR_MAX) {
       const strLength = formatByte - Format.FIXSTR_PREFIX;
       return new MessagePackString(this.decodeString(strLength));
     }
-    
+
     // Negative fixint (0xe0 - 0xff)
     if (formatByte >= Format.NEGATIVE_FIXINT_MIN) {
       // Convert to signed byte
       const signedValue = (formatByte as i8) as i64;
       return new MessagePackInteger(signedValue);
     }
-    
+
     // Handle specific format types
     switch (formatByte) {
       case Format.NIL:
         return new MessagePackNull();
-        
+
       case Format.FALSE:
         return new MessagePackBoolean(false);
-        
+
       case Format.TRUE:
         return new MessagePackBoolean(true);
-        
+
       case Format.UINT8:
         return new MessagePackInteger(this.readUint8() as i64);
-        
+
       case Format.UINT16:
         return new MessagePackInteger(this.readUint16BE() as i64);
-        
+
       case Format.UINT32:
         return new MessagePackInteger(this.readUint32BE() as i64);
-        
+
       case Format.UINT64:
         return new MessagePackInteger(this.readUint64BE());
-        
+
       case Format.INT8:
         return new MessagePackInteger((this.readUint8() as i8) as i64);
-        
+
       case Format.INT16:
         return new MessagePackInteger((this.readUint16BE() as i16) as i64);
-        
+
       case Format.INT32:
         return new MessagePackInteger((this.readUint32BE() as i32) as i64);
-        
+
       case Format.INT64:
         return new MessagePackInteger(this.readInt64BE());
-        
+
       case Format.FLOAT32:
         return new MessagePackFloat(this.readFloat32BE() as f64);
-        
+
       case Format.FLOAT64:
         return new MessagePackFloat(this.readFloat64BE());
-        
+
       case Format.STR8:
         return new MessagePackString(this.decodeString(this.readUint8()));
-        
+
       case Format.STR16:
         return new MessagePackString(this.decodeString(this.readUint16BE()));
-        
+
       case Format.STR32:
         return new MessagePackString(this.decodeString(this.readUint32BE()));
-        
+
       case Format.BIN8:
         return new MessagePackBinary(this.decodeBinary(this.readUint8()));
-        
+
       case Format.BIN16:
         return new MessagePackBinary(this.decodeBinary(this.readUint16BE()));
-        
+
       case Format.BIN32:
         return new MessagePackBinary(this.decodeBinary(this.readUint32BE()));
-        
+
+      case Format.ARRAY16:
+        return new MessagePackArray(this.decodeArray(this.readUint16BE()));
+
+      case Format.ARRAY32:
+        return new MessagePackArray(this.decodeArray(this.readUint32BE()));
+
+      case Format.MAP16:
+        return new MessagePackMap(this.decodeMap(this.readUint16BE()));
+
+      case Format.MAP32:
+        return new MessagePackMap(this.decodeMap(this.readUint32BE()));
+
       default:
         throw new MessagePackDecodeError(`Unsupported format byte: 0x${formatByte.toString(16)}`);
     }
   }
-  
+
   /**
    * Decode a string of the specified length from the buffer
    * @param length The length of the string in bytes
@@ -136,20 +163,20 @@ export class MessagePackDecoder {
     if (!this.hasRemaining(length)) {
       throw new MessagePackDecodeError(`Not enough bytes to read string of length ${length}`);
     }
-    
+
     // Create a temporary buffer for the string bytes
     const bytes = new Uint8Array(length);
     for (let i: u32 = 0; i < length; i++) {
       bytes[i] = this.buffer[this.position + i];
     }
-    
+
     // Advance the position
     this.position += length;
-    
+
     // Convert UTF-8 bytes to string
     return String.UTF8.decode(bytes.buffer);
   }
-  
+
   /**
    * Decode binary data of the specified length from the buffer
    * @param length The length of the binary data in bytes
@@ -159,26 +186,82 @@ export class MessagePackDecoder {
     if (!this.hasRemaining(length)) {
       throw new MessagePackDecodeError(`Not enough bytes to read binary data of length ${length}`);
     }
-    
+
     // Create a new buffer for the binary data
     const bytes = new Uint8Array(length);
     for (let i: u32 = 0; i < length; i++) {
       bytes[i] = this.buffer[this.position + i];
     }
-    
+
     // Advance the position
     this.position += length;
-    
+
     return bytes;
   }
-  
+
+  /**
+   * Decode an array of the specified length from the buffer
+   * @param length The number of elements in the array
+   * @returns The decoded array as MessagePackValue[]
+   */
+  private decodeArray(length: u32): MessagePackValue[] {
+    const array = new Array<MessagePackValue>(length);
+
+    for (let i: u32 = 0; i < length; i++) {
+      array[i] = this.decodeValue();
+    }
+
+    return array;
+  }
+
+  /**
+   * Decode a map with the specified number of key-value pairs from the buffer
+   * @param size The number of key-value pairs in the map
+   * @returns The decoded map as Map<string, MessagePackValue>
+   */
+  private decodeMap(size: u32): Map<string, MessagePackValue> {
+    const map = new Map<string, MessagePackValue>();
+
+    for (let i: u32 = 0; i < size; i++) {
+      // Decode key
+      const keyValue = this.decodeValue();
+      let key: string;
+
+      // Convert key to string (MessagePack spec allows any type as key, but we'll use string keys for simplicity)
+      if (keyValue.getType() === MessagePackValueType.STRING) {
+        key = (keyValue as MessagePackString).value;
+      } else {
+        // For non-string keys, we'll convert them to a string representation
+        // This is a simplification - in a full implementation, you might want to handle different key types
+        if (keyValue.getType() === MessagePackValueType.INTEGER) {
+          key = (keyValue as MessagePackInteger).value.toString();
+        } else if (keyValue.getType() === MessagePackValueType.BOOLEAN) {
+          key = (keyValue as MessagePackBoolean).value.toString();
+        } else if (keyValue.getType() === MessagePackValueType.NULL) {
+          key = "null";
+        } else {
+          // For other types, use a generic string representation
+          key = "key_" + i.toString();
+        }
+      }
+
+      // Decode value
+      const value = this.decodeValue();
+
+      // Add key-value pair to map
+      map.set(key, value);
+    }
+
+    return map;
+  }
+
   /**
    * Check if there are enough remaining bytes in the buffer
    */
   private hasRemaining(bytes: i32): boolean {
     return this.position + bytes <= this.buffer.length;
   }
-  
+
   /**
    * Read a single unsigned 8-bit integer
    */
@@ -188,7 +271,7 @@ export class MessagePackDecoder {
     }
     return this.buffer[this.position++];
   }
-  
+
   /**
    * Read an unsigned 16-bit integer in big-endian format
    */
@@ -196,12 +279,12 @@ export class MessagePackDecoder {
     if (!this.hasRemaining(2)) {
       throw new MessagePackDecodeError("Not enough bytes to read uint16");
     }
-    const value = (this.buffer[this.position] as u16) << 8 | 
-                  (this.buffer[this.position + 1] as u16);
+    const value = (this.buffer[this.position] as u16) << 8 |
+      (this.buffer[this.position + 1] as u16);
     this.position += 2;
     return value;
   }
-  
+
   /**
    * Read an unsigned 32-bit integer in big-endian format
    */
@@ -210,13 +293,13 @@ export class MessagePackDecoder {
       throw new MessagePackDecodeError("Not enough bytes to read uint32");
     }
     const value = (this.buffer[this.position] as u32) << 24 |
-                  (this.buffer[this.position + 1] as u32) << 16 |
-                  (this.buffer[this.position + 2] as u32) << 8 |
-                  (this.buffer[this.position + 3] as u32);
+      (this.buffer[this.position + 1] as u32) << 16 |
+      (this.buffer[this.position + 2] as u32) << 8 |
+      (this.buffer[this.position + 3] as u32);
     this.position += 4;
     return value;
   }
-  
+
   /**
    * Read an unsigned 64-bit integer in big-endian format
    */
@@ -224,20 +307,20 @@ export class MessagePackDecoder {
     if (!this.hasRemaining(8)) {
       throw new MessagePackDecodeError("Not enough bytes to read uint64");
     }
-    
+
     // Read as two 32-bit values and combine
     const high = this.readUint32BE() as i64;
     const low = this.readUint32BE() as i64;
     return (high << 32) | low;
   }
-  
+
   /**
    * Read a signed 64-bit integer in big-endian format
    */
   private readInt64BE(): i64 {
     return this.readUint64BE(); // Same bit pattern, different interpretation
   }
-  
+
   /**
    * Read a 32-bit float in big-endian format
    */
@@ -245,12 +328,12 @@ export class MessagePackDecoder {
     if (!this.hasRemaining(4)) {
       throw new MessagePackDecodeError("Not enough bytes to read float32");
     }
-    
+
     // Read as uint32 and reinterpret as float32
     const bits = this.readUint32BE();
     return reinterpret<f32>(bits);
   }
-  
+
   /**
    * Read a 64-bit float in big-endian format
    */
@@ -258,7 +341,7 @@ export class MessagePackDecoder {
     if (!this.hasRemaining(8)) {
       throw new MessagePackDecodeError("Not enough bytes to read float64");
     }
-    
+
     // Read as uint64 and reinterpret as float64
     const bits = this.readUint64BE();
     return reinterpret<f64>(bits);

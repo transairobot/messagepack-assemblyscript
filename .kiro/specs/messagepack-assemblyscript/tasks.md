@@ -76,14 +76,14 @@
   - Add unit tests for binary data reconstruction
   - _Requirements: 6.4_
 
-- [ ] 10. Implement collection decoding with recursive handling
-- [ ] 10.1 Create array decoding with recursive element processing
+- [x] 10. Implement collection decoding with recursive handling
+- [x] 10.1 Create array decoding with recursive element processing
   - Write array decoding logic for all array formats (fixarray, array16, array32)
   - Implement recursive decoding for array elements
   - Add unit tests for nested array decoding
   - _Requirements: 5.4_
 
-- [ ] 10.2 Create map decoding with key-value reconstruction
+- [x] 10.2 Create map decoding with key-value reconstruction
   - Write map decoding logic for all map formats (fixmap, map16, map32)
   - Implement key-value pair reconstruction with proper typing
   - Add unit tests for map decoding and key-value validation
