@@ -1,6 +1,6 @@
 // AssemblyScript unit tests for MessagePack map encoding
-import { Format } from "./format";
-import { MessagePackEncoder } from "./encoder";
+import { Format } from "../format";
+import { MessagePackEncoder } from "../encoder";
 import { 
   MessagePackValue, 
   MessagePackNull, 
@@ -11,7 +11,7 @@ import {
   MessagePackBinary,
   MessagePackArray,
   MessagePackMap
-} from "./types";
+} from "../types";
 
 /**
  * Test suite for map encoding

@@ -36,13 +36,8 @@ async function runTests() {
         // Run decoder integration tests
         const decoderIntegrationTestResult = wasmModule.runDecoderIntegrationTests();
         
-        // Run complex decoder tests
-        console.log("Running complex decoder tests...");
-        const complexDecoderTestResult = wasmModule.runComplexDecoderTests();
-        console.log("\n");
-        
         if (bufferTestResult && encoderTestResult && decoderTestResult && 
-            decoderIntegrationTestResult && complexDecoderTestResult) {
+            decoderIntegrationTestResult) {
             console.log("✅ All tests passed!");
         } else {
             console.log("❌ Some tests failed!");

@@ -1,5 +1,5 @@
 // MessagePack decoder integration tests
-import { MessagePackEncoder, MessagePackDecoder } from "./index";
+import { MessagePackEncoder, MessagePackDecoder } from "../index";
 import {
   MessagePackValue,
   MessagePackNull,
@@ -11,7 +11,7 @@ import {
   MessagePackArray,
   MessagePackMap,
   MessagePackValueType
-} from "./types";
+} from "../types";
 
 /**
  * Test round-trip encoding and decoding for null values

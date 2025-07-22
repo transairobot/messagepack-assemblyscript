@@ -89,44 +89,44 @@
   - Add unit tests for map decoding and key-value validation
   - _Requirements: 5.5_
 
-- [ ] 11. Create main MessagePackDecoder class
+- [x] 11. Create main MessagePackDecoder class
   - Integrate all decoding functions into a unified decoder class
   - Implement the main decode() method with format dispatch
   - Write integration tests for complex nested data structure decoding
   - _Requirements: 7.1, 7.2_
 
-- [ ] 12. Implement comprehensive error handling
-- [ ] 12.1 Create custom error classes and validation
+- [x] 12. Implement comprehensive error handling
+- [x] 12.1 Create custom error classes and validation
   - Define MessagePackEncodeError and MessagePackDecodeError classes
   - Implement input validation and error reporting with position information
   - Add unit tests for error conditions and error message accuracy
   - _Requirements: 5.2, 7.3_
 
-- [ ] 12.2 Add buffer boundary checking and malformed data handling
+- [x] 12.2 Add buffer boundary checking and malformed data handling
   - Implement buffer overflow protection and truncated data detection
   - Add validation for malformed MessagePack format bytes
   - Create unit tests for various error scenarios and edge cases
   - _Requirements: 5.2, 7.3_
 
-- [ ] 13. Create public API and exports
+- [x] 13. Create public API and exports
   - Define clean public interfaces for encoder and decoder classes
   - Export main classes and utility functions with proper TypeScript types
   - Write API documentation and usage examples
   - _Requirements: 7.1, 7.2, 7.4_
 
-- [ ] 14. Implement round-trip testing and validation
+- [x] 14. Implement round-trip testing and validation
   - Create comprehensive round-trip tests (encode then decode)
   - Test data integrity across all supported types and combinations
   - Add performance benchmarks for encoding/decoding operations
   - _Requirements: 5.1, 8.1, 8.2, 8.3_
 
-- [ ] 15. Add memory optimization and performance tuning
+- [x] 15. Add memory optimization and performance tuning
   - Implement buffer pooling and memory reuse strategies
   - Optimize hot paths in encoding/decoding for better performance
   - Add memory leak detection tests and WebAssembly-specific optimizations
   - _Requirements: 8.1, 8.2, 8.3, 8.4_
 
-- [ ] 16. Create comprehensive test suite and examples
+- [x] 16. Create comprehensive test suite and examples
   - Write integration tests with real-world data patterns
   - Create usage examples demonstrating all library features
   - Add cross-compatibility tests with other MessagePack implementations

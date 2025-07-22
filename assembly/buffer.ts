@@ -20,10 +20,32 @@ export class GrowableBuffer {
      * Doubles capacity if more space is needed
      */
     ensureCapacity(needed: i32): void {
+        // Validate input parameters
+        if (needed < 0) {
+            throw new Error("Cannot ensure negative capacity");
+        }
+        
         const required = this.position + needed;
+        
+        // Check for integer overflow
+        if (required < this.position) {
+            throw new Error("Buffer size overflow: requested size too large");
+        }
+        
+        // Prevent excessive memory allocation (limit to ~1GB)
+        if (required > 0x40000000) {
+            throw new Error(`Buffer size too large: ${required} bytes requested`);
+        }
+        
         if (required > this.capacity) {
             let newCapacity = this.capacity;
             while (newCapacity < required) {
+                // Check for overflow during capacity doubling
+                if (newCapacity > 0x20000000) {
+                    // If doubling would overflow, just use the required size
+                    newCapacity = required;
+                    break;
+                }
                 newCapacity *= 2;
             }
             this.resize(newCapacity);

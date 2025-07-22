@@ -1,6 +1,6 @@
 // AssemblyScript unit tests for MessagePack encoder
-import { Format } from "./format";
-import { MessagePackEncoder } from "./encoder";
+import { Format } from "../format";
+import { MessagePackEncoder } from "../encoder";
 import { 
     MessagePackNull, 
     MessagePackBoolean, 
@@ -9,7 +9,7 @@ import {
     MessagePackString, 
     MessagePackBinary,
     MessagePackValueType
-} from "./types";
+} from "../types";
 
 /**
  * Test suite for basic type encoding (null and boolean)

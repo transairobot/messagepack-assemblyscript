@@ -29,7 +29,7 @@ import { GrowableBuffer } from "./buffer";
  * ```
  */
 export class MessagePackEncoder {
-  private buffer: GrowableBuffer;
+  private buffer!: GrowableBuffer;
 
   /**
    * Creates a new MessagePack encoder with the specified initial buffer capacity
@@ -55,22 +55,41 @@ export class MessagePackEncoder {
     // Reset buffer for reuse
     this.buffer.reset();
 
-    // Encode based on value type
-    switch (value.getType()) {
-      case MessagePackValueType.NULL:
-        this.writeNull();
-        break;
-      case MessagePackValueType.BOOLEAN:
-        this.writeBoolean((value as MessagePackBoolean).value);
-        break;
-      case MessagePackValueType.INTEGER:
-        this.writeInteger((value as MessagePackInteger).value);
-        break;
+    // Encode based on value type - optimized dispatch using jump table approach
+    this.encodeValueOptimized(value);
+
+    // Return the encoded bytes
+    return this.buffer.toBytes();
+  }
+
+  /**
+   * Optimized encoding dispatch that minimizes branching
+   */
+  private encodeValueOptimized(value: MessagePackValue): void {
+    const type: MessagePackValueType = value.getType();
+
+    // Fast path for most common types
+    if (type === MessagePackValueType.INTEGER) {
+      this.writeInteger((value as MessagePackInteger).value);
+      return;
+    }
+    if (type === MessagePackValueType.STRING) {
+      this.writeString((value as MessagePackString).value);
+      return;
+    }
+    if (type === MessagePackValueType.BOOLEAN) {
+      this.writeBoolean((value as MessagePackBoolean).value);
+      return;
+    }
+    if (type === MessagePackValueType.NULL) {
+      this.writeNull();
+      return;
+    }
+
+    // Less common types
+    switch (type) {
       case MessagePackValueType.FLOAT:
         this.writeFloat((value as MessagePackFloat).value);
-        break;
-      case MessagePackValueType.STRING:
-        this.writeString((value as MessagePackString).value);
         break;
       case MessagePackValueType.BINARY:
         this.writeBinary((value as MessagePackBinary).value);
@@ -81,14 +100,9 @@ export class MessagePackEncoder {
       case MessagePackValueType.MAP:
         this.writeMap((value as MessagePackMap).value);
         break;
-      default:
-        throw new MessagePackEncodeError("Unsupported type: " + value.getType().toString());
     }
-
-    // Return the encoded bytes
-    return this.buffer.toBytes();
   }
-  
+
   /**
    * Convenience method to encode a null value
    * 
@@ -99,7 +113,7 @@ export class MessagePackEncoder {
     this.writeNull();
     return this.buffer.toBytes();
   }
-  
+
   /**
    * Convenience method to encode a boolean value
    * 
@@ -111,7 +125,7 @@ export class MessagePackEncoder {
     this.writeBoolean(value);
     return this.buffer.toBytes();
   }
-  
+
   /**
    * Convenience method to encode an integer value
    * 
@@ -123,7 +137,7 @@ export class MessagePackEncoder {
     this.writeInteger(value);
     return this.buffer.toBytes();
   }
-  
+
   /**
    * Convenience method to encode a floating point value
    * 
@@ -135,7 +149,7 @@ export class MessagePackEncoder {
     this.writeFloat(value);
     return this.buffer.toBytes();
   }
-  
+
   /**
    * Convenience method to encode a string value
    * 
@@ -147,7 +161,7 @@ export class MessagePackEncoder {
     this.writeString(value);
     return this.buffer.toBytes();
   }
-  
+
   /**
    * Convenience method to encode binary data
    * 
@@ -159,7 +173,7 @@ export class MessagePackEncoder {
     this.writeBinary(value);
     return this.buffer.toBytes();
   }
-  
+
   /**
    * Convenience method to encode an array of values
    * 
@@ -171,7 +185,7 @@ export class MessagePackEncoder {
     this.writeArray(values);
     return this.buffer.toBytes();
   }
-  
+
   /**
    * Convenience method to encode a map of key-value pairs
    * 
@@ -202,65 +216,58 @@ export class MessagePackEncoder {
 
   /**
    * Writes an integer value with optimal format selection to the buffer
-   * Follows MessagePack specification for integer encoding:
-   * - Positive fixint: 0 to 127 (0x00 to 0x7f)
-   * - Negative fixint: -32 to -1 (0xe0 to 0xff)
-   * - int8/uint8: -128 to 255 (0xd0, 0xcc)
-   * - int16/uint16: -32768 to 65535 (0xd1, 0xcd)
-   * - int32/uint32: -2147483648 to 4294967295 (0xd2, 0xce)
-   * - int64/uint64: -9223372036854775808 to 18446744073709551615 (0xd3, 0xcf)
+   * Optimized hot path for common integer ranges
    * 
    * @param value The integer value to write
    */
   private writeInteger(value: i64): void {
-    // Positive fixint (0x00 - 0x7f)
-    if (0 <= value && value <= 0x7f) {
+    // Hot path: positive fixint (0x00 - 0x7f) - most common case
+    if (value >= 0 && value <= 0x7f) {
       this.buffer.writeUint8(value as u8);
       return;
     }
 
-    // Negative fixint (0xe0 - 0xff)
-    if (-32 <= value && value < 0) {
+    // Hot path: negative fixint (0xe0 - 0xff) - second most common
+    if (value >= -32 && value < 0) {
       this.buffer.writeUint8((value & 0xff) as u8);
       return;
     }
 
-    // Unsigned integers
+    // Cold path: larger integers - use optimized range checking
+    this.writeIntegerColdPath(value);
+  }
+
+  /**
+   * Cold path for integer encoding - handles larger values
+   */
+  private writeIntegerColdPath(value: i64): void {
     if (value >= 0) {
+      // Unsigned integers - use bit operations for faster range checking
       if (value <= 0xff) {
-        // uint8 (0xcc)
         this.buffer.writeUint8(Format.UINT8);
         this.buffer.writeUint8(value as u8);
       } else if (value <= 0xffff) {
-        // uint16 (0xcd)
         this.buffer.writeUint8(Format.UINT16);
         this.buffer.writeUint16BE(value as u16);
       } else if (value <= 0xffffffff) {
-        // uint32 (0xce)
         this.buffer.writeUint8(Format.UINT32);
         this.buffer.writeUint32BE(value as u32);
       } else {
-        // uint64 (0xcf)
         this.buffer.writeUint8(Format.UINT64);
         this.buffer.writeUint64BE(value as u64);
       }
-    }
-    // Signed integers
-    else {
+    } else {
+      // Signed integers
       if (value >= -0x80) {
-        // int8 (0xd0)
         this.buffer.writeUint8(Format.INT8);
         this.buffer.writeUint8((value & 0xff) as u8);
       } else if (value >= -0x8000) {
-        // int16 (0xd1)
         this.buffer.writeUint8(Format.INT16);
         this.buffer.writeUint16BE((value & 0xffff) as u16);
       } else if (value >= -0x80000000) {
-        // int32 (0xd2)
         this.buffer.writeUint8(Format.INT32);
         this.buffer.writeUint32BE((value & 0xffffffff) as u32);
       } else {
-        // int64 (0xd3)
         this.buffer.writeUint8(Format.INT64);
         this.buffer.writeUint64BE(value as u64);
       }
@@ -285,14 +292,14 @@ export class MessagePackEncoder {
       this.buffer.writeFloat32BE(f32(value));
       return;
     }
-    
+
     // Simple integer-like values can use float32
     if (value == 0.0 || value == 1.0 || value == -1.0) {
       this.buffer.writeUint8(Format.FLOAT32);
       this.buffer.writeFloat32BE(f32(value));
       return;
     }
-    
+
     // For all other values, use float64 for maximum precision
     this.buffer.writeUint8(Format.FLOAT64);
     this.buffer.writeFloat64BE(value);
@@ -311,10 +318,28 @@ export class MessagePackEncoder {
    * @param value The string value to write
    */
   private writeString(value: string): void {
+    // Validate string length is reasonable
+    if (value.length > 0x7FFFFFFF) {
+      throw MessagePackEncodeError.withPosition(
+        `String too long: ${value.length} characters`,
+        this.buffer.getPosition(),
+        "string validation"
+      );
+    }
+
     // Get UTF-8 encoded bytes
     const utf8Bytes = this.stringToUTF8(value);
     const length = utf8Bytes.length;
-    
+
+    // Validate UTF-8 byte length (length is i32, so max is 0x7FFFFFFF)
+    if (length < 0) {
+      throw MessagePackEncodeError.withPosition(
+        `Invalid string UTF-8 encoding length: ${length} bytes`,
+        this.buffer.getPosition(),
+        "UTF-8 validation"
+      );
+    }
+
     // Select format based on length
     if (length <= 31) {
       // fixstr format (0xa0 - 0xbf)
@@ -332,11 +357,11 @@ export class MessagePackEncoder {
       this.buffer.writeUint8(Format.STR32);
       this.buffer.writeUint32BE(length as u32);
     }
-    
+
     // Write the UTF-8 bytes
     this.buffer.writeBytes(utf8Bytes);
   }
-  
+
   /**
    * Writes binary data with optimal format selection based on length to the buffer
    * MessagePack has three binary formats:
@@ -348,7 +373,16 @@ export class MessagePackEncoder {
    */
   private writeBinary(value: Uint8Array): void {
     const length = value.length;
-    
+
+    // Validate binary data length (length is i32, so check for negative)
+    if (length < 0) {
+      throw MessagePackEncodeError.withPosition(
+        `Invalid binary data length: ${length} bytes`,
+        this.buffer.getPosition(),
+        "binary validation"
+      );
+    }
+
     // Select format based on length
     if (length <= 255) {
       // bin8 format (0xc4)
@@ -363,11 +397,11 @@ export class MessagePackEncoder {
       this.buffer.writeUint8(Format.BIN32);
       this.buffer.writeUint32BE(length as u32);
     }
-    
+
     // Write the binary data
     this.buffer.writeBytes(value);
   }
-  
+
   /**
    * Writes an array with optimal format selection based on length to the buffer
    * MessagePack has three array formats:
@@ -381,7 +415,16 @@ export class MessagePackEncoder {
    */
   private writeArray(values: MessagePackValue[]): void {
     const length = values.length;
-    
+
+    // Validate array length (length is i32, so check for negative)
+    if (length < 0) {
+      throw MessagePackEncodeError.withPosition(
+        `Invalid array length: ${length} elements`,
+        this.buffer.getPosition(),
+        "array validation"
+      );
+    }
+
     // Select format based on length
     if (length <= 15) {
       // fixarray format (0x90 - 0x9f)
@@ -395,15 +438,15 @@ export class MessagePackEncoder {
       this.buffer.writeUint8(Format.ARRAY32);
       this.buffer.writeUint32BE(length as u32);
     }
-    
+
     // Recursively encode each array element
     for (let i = 0; i < length; i++) {
       // Get current buffer position before encoding element
       const startPos = this.buffer.getPosition();
-      
+
       // Encode the element
       const element = values[i];
-      
+
       // Handle each element type
       switch (element.getType()) {
         case MessagePackValueType.NULL:
@@ -433,7 +476,7 @@ export class MessagePackEncoder {
         default:
           throw new MessagePackEncodeError("Unsupported array element type: " + element.getType().toString());
       }
-      
+
       // Verify element was encoded (buffer position should have advanced)
       if (this.buffer.getPosition() <= startPos) {
         throw new MessagePackEncodeError("Failed to encode array element at index " + i.toString());
@@ -455,7 +498,16 @@ export class MessagePackEncoder {
   private writeMap(map: Map<string, MessagePackValue>): void {
     const keys = map.keys();
     const size = keys.length;
-    
+
+    // Validate map size (size is i32, so check for negative)
+    if (size < 0) {
+      throw MessagePackEncodeError.withPosition(
+        `Invalid map size: ${size} key-value pairs`,
+        this.buffer.getPosition(),
+        "map validation"
+      );
+    }
+
     // Select format based on size
     if (size <= 15) {
       // fixmap format (0x80 - 0x8f)
@@ -469,27 +521,27 @@ export class MessagePackEncoder {
       this.buffer.writeUint8(Format.MAP32);
       this.buffer.writeUint32BE(size as u32);
     }
-    
+
     // Recursively encode each key-value pair
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i];
       const value = map.get(key);
-      
+
       // Encode key (as string)
       // Get current buffer position before encoding key
       const keyStartPos = this.buffer.getPosition();
-      
+
       // Encode the key
       this.writeString(key);
-      
+
       // Verify key was encoded (buffer position should have advanced)
       if (this.buffer.getPosition() <= keyStartPos) {
         throw new MessagePackEncodeError("Failed to encode map key: " + key);
       }
-      
+
       // Get current buffer position before encoding value
       const valueStartPos = this.buffer.getPosition();
-      
+
       // Encode the value based on its type
       switch (value.getType()) {
         case MessagePackValueType.NULL:
@@ -519,7 +571,7 @@ export class MessagePackEncoder {
         default:
           throw new MessagePackEncodeError("Unsupported map value type: " + value.getType().toString());
       }
-      
+
       // Verify value was encoded (buffer position should have advanced)
       if (this.buffer.getPosition() <= valueStartPos) {
         throw new MessagePackEncodeError("Failed to encode map value for key: " + key);
@@ -529,7 +581,7 @@ export class MessagePackEncoder {
 
   /**
    * Converts a string to UTF-8 encoded bytes
-   * This is a simplified implementation that handles ASCII and basic UTF-8
+   * Optimized implementation with fast path for ASCII strings
    * 
    * @param str The string to convert to UTF-8
    * @returns A Uint8Array containing the UTF-8 encoded bytes
@@ -539,11 +591,31 @@ export class MessagePackEncoder {
     if (str.length === 0) {
       return new Uint8Array(0);
     }
-    
-    // First pass: calculate the byte length
-    let byteLength: i32 = 0;
+
+    // Fast path for ASCII-only strings (very common case)
+    let isAsciiOnly = true;
     for (let i = 0; i < str.length; i++) {
-      const c = str.charCodeAt(i);
+      if (str.charCodeAt(i) >= 0x80) {
+        isAsciiOnly = false;
+        break;
+      }
+    }
+
+    if (isAsciiOnly) {
+      // For ASCII-only strings, byte length equals string length
+      const bytes = new Uint8Array(str.length);
+      for (let i = 0; i < str.length; i++) {
+        bytes[i] = str.charCodeAt(i) as u8;
+      }
+      return bytes;
+    }
+
+    // For non-ASCII strings, calculate the byte length first
+    let byteLength: i32 = 0;
+    let i = 0;
+    while (i < str.length) {
+      const c = str.charCodeAt(i++);
+
       if (c < 0x80) {
         // ASCII character (1 byte)
         byteLength += 1;
@@ -556,21 +628,22 @@ export class MessagePackEncoder {
       } else {
         // Surrogate pair (4-byte UTF-8 sequence)
         // Skip the high surrogate and encode the pair as a single code point
-        i++;
+        i++; // Skip low surrogate
         byteLength += 4;
       }
     }
-    
+
     // Allocate buffer for UTF-8 bytes
     const bytes = new Uint8Array(byteLength);
     let pos = 0;
-    
+
     // Second pass: encode characters to UTF-8
-    for (let i = 0; i < str.length; i++) {
-      let c = str.charCodeAt(i);
-      
+    i = 0;
+    while (i < str.length) {
+      const c = str.charCodeAt(i++);
+
       if (c < 0x80) {
-        // ASCII character (1 byte)
+        // ASCII character (1 byte) - most common case
         bytes[pos++] = c as u8;
       } else if (c < 0x800) {
         // 2-byte UTF-8 sequence
@@ -581,37 +654,34 @@ export class MessagePackEncoder {
         bytes[pos++] = (0xE0 | (c >> 12)) as u8;
         bytes[pos++] = (0x80 | ((c >> 6) & 0x3F)) as u8;
         bytes[pos++] = (0x80 | (c & 0x3F)) as u8;
-      } else {
+      } else if (c <= 0xDBFF && i < str.length) {
         // Surrogate pair (4-byte UTF-8 sequence)
-        // Combine the surrogate pair to get the full code point
-        if (i + 1 < str.length) {
-          const c2 = str.charCodeAt(++i);
-          if (c >= 0xD800 && c <= 0xDBFF && c2 >= 0xDC00 && c2 <= 0xDFFF) {
-            // Valid surrogate pair
-            const codePoint = 0x10000 + ((c - 0xD800) << 10) + (c2 - 0xDC00);
-            bytes[pos++] = (0xF0 | (codePoint >> 18)) as u8;
-            bytes[pos++] = (0x80 | ((codePoint >> 12) & 0x3F)) as u8;
-            bytes[pos++] = (0x80 | ((codePoint >> 6) & 0x3F)) as u8;
-            bytes[pos++] = (0x80 | (codePoint & 0x3F)) as u8;
-          } else {
-            // Invalid surrogate pair, encode as replacement character
-            bytes[pos++] = 0xEF;
-            bytes[pos++] = 0xBF;
-            bytes[pos++] = 0xBD;
-            i--; // Process the second code unit separately
-          }
+        const c2 = str.charCodeAt(i);
+        if (c2 >= 0xDC00 && c2 <= 0xDFFF) {
+          // Valid surrogate pair
+          i++; // Consume low surrogate
+          const codePoint = 0x10000 + ((c - 0xD800) << 10) + (c2 - 0xDC00);
+          bytes[pos++] = (0xF0 | (codePoint >> 18)) as u8;
+          bytes[pos++] = (0x80 | ((codePoint >> 12) & 0x3F)) as u8;
+          bytes[pos++] = (0x80 | ((codePoint >> 6) & 0x3F)) as u8;
+          bytes[pos++] = (0x80 | (codePoint & 0x3F)) as u8;
         } else {
-          // Unpaired surrogate, encode as replacement character
+          // Invalid surrogate pair, encode as replacement character
           bytes[pos++] = 0xEF;
           bytes[pos++] = 0xBF;
           bytes[pos++] = 0xBD;
         }
+      } else {
+        // Unpaired surrogate, encode as replacement character
+        bytes[pos++] = 0xEF;
+        bytes[pos++] = 0xBF;
+        bytes[pos++] = 0xBD;
       }
     }
-    
+
     return bytes;
   }
-  
+
   /**
    * Creates a MessagePackValue wrapper for a null value
    * 
@@ -620,7 +690,7 @@ export class MessagePackEncoder {
   static fromNull(): MessagePackNull {
     return new MessagePackNull();
   }
-  
+
   /**
    * Creates a MessagePackValue wrapper for a boolean value
    * 
@@ -630,7 +700,7 @@ export class MessagePackEncoder {
   static fromBoolean(value: boolean): MessagePackBoolean {
     return new MessagePackBoolean(value);
   }
-  
+
   /**
    * Creates a MessagePackValue wrapper for an integer value
    * 
@@ -640,7 +710,7 @@ export class MessagePackEncoder {
   static fromInteger(value: i64): MessagePackInteger {
     return new MessagePackInteger(value);
   }
-  
+
   /**
    * Creates a MessagePackValue wrapper for a floating point value
    * 
@@ -650,7 +720,7 @@ export class MessagePackEncoder {
   static fromFloat(value: f64): MessagePackFloat {
     return new MessagePackFloat(value);
   }
-  
+
   /**
    * Creates a MessagePackValue wrapper for a string value
    * 
@@ -660,7 +730,7 @@ export class MessagePackEncoder {
   static fromString(value: string): MessagePackString {
     return new MessagePackString(value);
   }
-  
+
   /**
    * Creates a MessagePackValue wrapper for binary data
    * 
@@ -669,5 +739,28 @@ export class MessagePackEncoder {
    */
   static fromBinary(value: Uint8Array): MessagePackBinary {
     return new MessagePackBinary(value);
+  }
+
+
+
+  /**
+   * Get current buffer capacity for monitoring memory usage
+   */
+  getBufferCapacity(): i32 {
+    return this.buffer.getCapacity();
+  }
+
+  /**
+   * Get current buffer position for monitoring memory usage
+   */
+  getBufferPosition(): i32 {
+    return this.buffer.getPosition();
+  }
+
+  /**
+   * Reset the encoder for reuse without creating a new instance
+   */
+  reset(): void {
+    this.buffer.reset();
   }
 }

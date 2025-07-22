@@ -1,6 +1,6 @@
 // AssemblyScript unit tests for MessagePack array encoding
-import { Format } from "./format";
-import { MessagePackEncoder } from "./encoder";
+import { Format } from "../format";
+import { MessagePackEncoder } from "../encoder";
 import { 
   MessagePackValue, 
   MessagePackNull, 
@@ -10,7 +10,7 @@ import {
   MessagePackString, 
   MessagePackBinary,
   MessagePackArray
-} from "./types";
+} from "../types";
 
 /**
  * Test suite for array encoding

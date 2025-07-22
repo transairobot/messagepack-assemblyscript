@@ -9,8 +9,8 @@ import {
   MessagePackArray, 
   MessagePackMap,
   MessagePackValue
-} from "./types";
-import { MessagePackEncoder } from "./encoder";
+} from "../types";
+import { MessagePackEncoder } from "../encoder";
 
 /**
  * Test suite for complex nested data structures

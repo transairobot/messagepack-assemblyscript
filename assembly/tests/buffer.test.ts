@@ -1,5 +1,5 @@
 // AssemblyScript unit tests for buffer utilities
-import { GrowableBuffer, BufferReader } from "./buffer";
+import { GrowableBuffer, BufferReader } from "../buffer";
 
 /**
  * Test suite for GrowableBuffer functionality
