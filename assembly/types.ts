@@ -20,6 +20,26 @@ export enum MessagePackValueType {
  */
 export abstract class MessagePackValue {
     abstract getType(): MessagePackValueType;
+
+    /**
+     * Returns a string representation of this value and all its children
+     * @param indent Current indentation level for pretty printing
+     * @returns String representation of the value
+     */
+    abstract toString(indent: i32 = 0): string;
+
+    /**
+     * Helper method to create indentation string
+     * @param level Indentation level
+     * @returns String with appropriate spaces
+     */
+    protected getIndent(level: i32): string {
+        let result = "";
+        for (let i = 0; i < level * 2; i++) {
+            result += " ";
+        }
+        return result;
+    }
 }
 
 /**
@@ -28,6 +48,10 @@ export abstract class MessagePackValue {
 export class MessagePackNull extends MessagePackValue {
     getType(): MessagePackValueType {
         return MessagePackValueType.NULL;
+    }
+
+    toString(indent: i32 = 0): string {
+        return "null";
     }
 }
 
@@ -45,6 +69,10 @@ export class MessagePackBoolean extends MessagePackValue {
     getType(): MessagePackValueType {
         return MessagePackValueType.BOOLEAN;
     }
+
+    toString(indent: i32 = 0): string {
+        return this.value ? "true" : "false";
+    }
 }
 
 /**
@@ -60,6 +88,10 @@ export class MessagePackInteger extends MessagePackValue {
 
     getType(): MessagePackValueType {
         return MessagePackValueType.INTEGER;
+    }
+
+    toString(indent: i32 = 0): string {
+        return this.value.toString();
     }
 }
 
@@ -77,6 +109,10 @@ export class MessagePackFloat extends MessagePackValue {
     getType(): MessagePackValueType {
         return MessagePackValueType.FLOAT;
     }
+
+    toString(indent: i32 = 0): string {
+        return this.value.toString();
+    }
 }
 
 /**
@@ -92,6 +128,10 @@ export class MessagePackString extends MessagePackValue {
 
     getType(): MessagePackValueType {
         return MessagePackValueType.STRING;
+    }
+
+    toString(indent: i32 = 0): string {
+        return `"${this.value}"`;
     }
 }
 
@@ -109,6 +149,21 @@ export class MessagePackBinary extends MessagePackValue {
     getType(): MessagePackValueType {
         return MessagePackValueType.BINARY;
     }
+
+    toString(indent: i32 = 0): string {
+        let result = "<binary[" + this.value.length.toString() + "]: ";
+        for (let i = 0; i < min(this.value.length, 16); i++) {
+            if (i > 0) result += " ";
+            let hex = this.value[i].toString(16);
+            if (hex.length == 1) hex = "0" + hex;
+            result += hex;
+        }
+        if (this.value.length > 16) {
+            result += "...";
+        }
+        result += ">";
+        return result;
+    }
 }
 
 /**
@@ -125,6 +180,24 @@ export class MessagePackArray extends MessagePackValue {
     getType(): MessagePackValueType {
         return MessagePackValueType.ARRAY;
     }
+
+    toString(indent: i32 = 0): string {
+        if (this.value.length == 0) {
+            return "[]";
+        }
+
+        let result = "[\n";
+        for (let i = 0; i < this.value.length; i++) {
+            result += this.getIndent(indent + 1);
+            result += this.value[i].toString(indent + 1);
+            if (i < this.value.length - 1) {
+                result += ",";
+            }
+            result += "\n";
+        }
+        result += this.getIndent(indent) + "]";
+        return result;
+    }
 }
 
 /**
@@ -140,6 +213,28 @@ export class MessagePackMap extends MessagePackValue {
 
     getType(): MessagePackValueType {
         return MessagePackValueType.MAP;
+    }
+
+    toString(indent: i32 = 0): string {
+        if (this.value.size == 0) {
+            return "{}";
+        }
+
+        let result = "{\n";
+        let keys = this.value.keys();
+        for (let i = 0; i < keys.length; i++) {
+            let key = keys[i];
+            let value = this.value.get(key);
+            result += this.getIndent(indent + 1);
+            result += `"${key}": `;
+            result += value.toString(indent + 1);
+            if (i < keys.length - 1) {
+                result += ",";
+            }
+            result += "\n";
+        }
+        result += this.getIndent(indent) + "}";
+        return result;
     }
 }
 
