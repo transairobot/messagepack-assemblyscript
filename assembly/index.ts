@@ -74,6 +74,7 @@
 // Main encoder and decoder classes
 export { MessagePackEncoder } from "./encoder";
 export { MessagePackDecoder } from "./decoder";
+export * from "./types"
 
 // === Version Information ===
 

@@ -3,8 +3,8 @@
     "version": "1.0.0",
     "description": "MessagePack serialization library for AssemblyScript",
     "type": "module",
-    "main": "build/release.js",
-    "types": "build/release.d.ts",
+    "main": "index/index.ts",
+    "types": "index/index.ts",
     "scripts": {
         "build": "asc assembly/index.ts --target release",
         "build:debug": "asc assembly/index.ts --target debug",
