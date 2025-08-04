@@ -2151,15 +2151,13 @@ export class ExampleCompany implements Serializable {
             case "founder":
                 // Serialize the nested person object
                 const founderSerialized = SerializationUtils.serialize(this.founder);
-                const founderDecoder = new MessagePackDecoder();
-                founderDecoder.setData(founderSerialized);
+                const founderDecoder = new MessagePackDecoder(founderSerialized);
                 return founderDecoder.decode();
             case "employees":
                 const employeeValues: MessagePackValue[] = [];
                 for (let i = 0; i < this.employees.length; i++) {
                     const empSerialized = SerializationUtils.serialize(this.employees[i]);
-                    const empDecoder = new MessagePackDecoder();
-                    empDecoder.setData(empSerialized);
+                    const empDecoder = new MessagePackDecoder(empSerialized);
                     employeeValues.push(empDecoder.decode());
                 }
                 return toMessagePackArray(employeeValues);
