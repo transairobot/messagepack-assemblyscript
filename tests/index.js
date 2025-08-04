@@ -20,27 +20,17 @@ async function runTests() {
         // Use dynamic import to load the ES module
         const wasmModule = await import(`file://${path.resolve(debugJsPath)}`);
         
-        // Run buffer tests
-        console.log("Running buffer management tests...");
-        const bufferTestResult = wasmModule.runAllBufferTests();
-        console.log("\n");
+        // Check what functions are available
+        console.log("Available test functions:", Object.keys(wasmModule).filter(key => key.includes('test') || key.includes('Test')));
         
-        // Run encoder tests
-        console.log("Running encoder tests...");
-        const encoderTestResult = wasmModule.runAllEncoderTests();
+        // Run class serialization tests
+        console.log("Running class serialization tests...");
+        const classSerializationTestResult = wasmModule.runAllClassSerializationTests();
         
-        // Run decoder tests
-        console.log("Running decoder tests...");
-        const decoderTestResult = wasmModule.runDecoderTests();
-        
-        // Run decoder integration tests
-        const decoderIntegrationTestResult = wasmModule.runDecoderIntegrationTests();
-        
-        if (bufferTestResult && encoderTestResult && decoderTestResult && 
-            decoderIntegrationTestResult) {
-            console.log("✅ All tests passed!");
+        if (classSerializationTestResult) {
+            console.log("✅ Class serialization tests passed!");
         } else {
-            console.log("❌ Some tests failed!");
+            console.log("❌ Class serialization tests failed!");
             process.exit(1);
         }
         

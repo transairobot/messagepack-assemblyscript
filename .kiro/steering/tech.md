@@ -6,6 +6,11 @@
 - **MessagePack**: Binary serialization format specification
 - **WebAssembly**: Target compilation format for high-performance web applications
 
+## Note(IMPORTANT)
+- AssemblyScript Not Support try catch, can throw.
+- AssemblyScript basic types cannot be nullable, but class and function types can. Appending | null declares a nullable type. number support nullable
+- For test: use build/debug.js for test, check tests/buffer.test.js and index.js
+
 ## Development Tools
 
 - **Node.js**: JavaScript runtime for building and testing

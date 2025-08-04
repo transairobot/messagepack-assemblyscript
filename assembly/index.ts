@@ -76,6 +76,37 @@ export { MessagePackEncoder } from "./encoder";
 export { MessagePackDecoder } from "./decoder";
 export * from "./types"
 
+// Class serialization system
+export {
+    SerializableFieldType,
+    FieldMetadata,
+    ClassMetadata,
+    ClassRegistry,
+    Serializable,
+    ClassSerializationEncoder,
+    // Type conversion utilities
+    toMessagePackBoolean,
+    toMessagePackInteger32,
+    toMessagePackInteger64,
+    toMessagePackUnsigned32,
+    toMessagePackUnsigned64,
+    toMessagePackFloat32,
+    toMessagePackFloat64,
+    toMessagePackString,
+    toMessagePackBinary,
+    toMessagePackArray,
+    toMessagePackMap,
+    toMessagePackNull,
+    toMessagePackNullableString,
+    toMessagePackNullableBinary,
+    booleanArrayToMessagePack,
+    integer32ArrayToMessagePack,
+    integer64ArrayToMessagePack,
+    float32ArrayToMessagePack,
+    float64ArrayToMessagePack,
+    stringArrayToMessagePack
+} from "./class-serialization";
+
 // === Version Information ===
 
 /**
@@ -89,6 +120,10 @@ export const VERSION = "1.0.0";
 export const MESSAGEPACK_SPEC_VERSION = "5";
 
 // === Development Exports (conditionally exported) ===
+
+export {
+  runAllClassSerializationTests
+} from "./tests/class-serialization.test";
 
 // export {
 //   runAllBufferTests

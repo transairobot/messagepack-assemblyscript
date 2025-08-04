@@ -1,20 +1,122 @@
+---
+inclusion: always
+---
+
 # MessagePack AssemblyScript Library
 
-This project is a MessagePack serialization library implemented in AssemblyScript. MessagePack is a binary serialization format that's more efficient than JSON, allowing for smaller data sizes and faster parsing.
+High-performance MessagePack serialization for AssemblyScript/WebAssembly. Prioritize performance and strict MessagePack specification compliance.
 
-## Purpose
+## Core Architecture
 
-The library provides efficient encoding and decoding of data between AssemblyScript types and MessagePack binary format. It's designed to be used in WebAssembly environments where performance and small binary size are important.
+### Value Type System
+All MessagePack values must:
+- Extend `MessagePackValue` abstract base class
+- Implement `encode(): u8[]` instance method  
+- Provide static `decode(reader: BufferReader): ValueType` method
+- Validate constructor inputs with descriptive errors
 
-## Key Features
+### Buffer Management
+- Use `GrowableBuffer` for encoding (never manual allocation)
+- Use `BufferReader` for decoding with bounds checking
+- Never perform manual buffer copies
+- Always include bounds checking for buffer operations
 
-- Binary serialization with MessagePack format
-- Optimized for WebAssembly environments
-- Type-safe encoding and decoding
-- Support for all MessagePack data types
-- Efficient buffer management
-- Comprehensive test suite
+## Code Standards
 
-## Current Status
+### AssemblyScript Types
+- Use native types: `i32`, `i64`, `u8`, `u16`, `u32`, `f32`, `f64`
+- Use `u8[]` for binary data (never `Uint8Array`)
+- Use `Map<K,V>` and `Array<T>` with explicit generics
+- Provide explicit return types for all public methods
 
-The library is under active development. The encoder currently supports basic types (null, boolean, integers) with more complex types planned for implementation. The decoder is in early development stages.
+### Naming Conventions
+- Classes: `PascalCase` (MessagePackEncoder, StringValue)
+- Methods/variables: `camelCase` (encodeValue, bufferSize)
+- Constants: `UPPER_SNAKE_CASE` (Format.POSITIVE_FIXINT)
+- Private members: underscore prefix (_buffer, _position)
+
+### Error Handling
+- Throw descriptive errors with specific context
+- Validate all inputs in constructors and public methods
+- Include expected vs actual values in error messages
+
+## MessagePack Specification
+
+### Format Compliance
+- Use exact format codes from `Format` namespace constants
+- Handle big-endian byte order for multi-byte values
+- Support all types: nil, bool, int, float, str, bin, array, map, ext
+- Validate data lengths match format specifications precisely
+
+### Encoding Rules
+- Always use most compact format for each value type
+- Integers: choose appropriate fixed/variable length format
+- Strings: UTF-8 encoding with length prefix
+- Binary: raw bytes with length prefix
+- Collections: recursive encoding with count prefix
+
+## Class Serialization
+
+### Decorator Pattern
+- Apply `@msgpack` decorator to serializable classes
+- Support field renaming: `@msgpack("customName")`
+- Handle field exclusion and optional fields
+- Implement circular reference detection
+
+### Serialization Logic
+- Traverse object properties in deterministic order
+- Handle nested objects recursively
+- Maintain type information for proper deserialization
+
+## Testing Requirements
+
+### Test Structure
+- Create corresponding `.test.ts` file in `assembly/tests/` for every module
+- Return `boolean` from test functions (true = pass, false = fail)
+- Use descriptive names: `testEncodePositiveInteger`
+
+### Test Coverage
+- Include roundtrip tests: encode → decode → verify equality
+- Test edge cases: boundary values, empty collections, null values
+- Test error conditions: invalid input, malformed data
+- Verify cross-compatibility against reference implementations
+
+### Test Implementation
+- Log detailed failure information with expected vs actual values
+- Use `console.log()` for test output and debugging
+- Include binary data inspection for format validation
+- Test both success and failure paths
+
+## Performance Guidelines
+
+### Memory Management
+- Minimize object allocations in hot paths
+- Reuse buffers when possible (with proper clearing)
+- Prefer stack allocation for small, fixed-size data
+- Avoid string concatenation in loops
+
+### Optimization Strategy
+- Use appropriate data structures for access patterns
+- Cache computed values when reused
+- Optimize for common case scenarios first
+
+## Development Workflow
+
+### Code Generation
+- Start with the simplest working implementation
+- Add optimizations only after correctness is verified
+- Follow existing naming and structure patterns exactly
+- Include JSDoc comments for all public APIs
+
+### Debugging Process
+- Check binary output format against MessagePack specification
+- Verify buffer bounds and memory management
+- Ensure roundtrip compatibility (encode/decode cycles)
+- Validate against existing test patterns
+
+### Implementation Priority
+1. Correctness and specification compliance
+2. Comprehensive error handling and validation
+3. Complete test coverage with edge cases
+4. Performance optimization
+5. Documentation and code clarity
