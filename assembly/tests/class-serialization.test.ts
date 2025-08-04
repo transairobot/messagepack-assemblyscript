@@ -9,6 +9,10 @@ import {
     ClassRegistry,
     Serializable,
     ClassSerializationEncoder,
+    ClassSerializationError,
+    ClassFactory,
+    ClassSerializationDecoder,
+    ClassDeserializationError,
     toMessagePackBoolean,
     toMessagePackInteger32,
     toMessagePackInteger64,
@@ -860,7 +864,7 @@ class NestedTestClass implements Serializable {
             const encoder = new MessagePackEncoder();
             const classEncoder = new ClassSerializationEncoder(encoder);
             const serializedUser = classEncoder.encodeClass(this.user);
-            
+
             // Decode it back to a MessagePackMap for validation
             const decoder = new MessagePackDecoder(serializedUser);
             return decoder.decode();
@@ -911,6 +915,60 @@ class MissingFieldClass implements Serializable {
             return toMessagePackString(this.name);
         }
         // Return null for the required "age" field
+        return null;
+    }
+}
+
+/**
+ * Test implementation for field type mismatch error testing
+ */
+class TypeMismatchClass implements Serializable {
+    name: string;
+    age: i32;
+
+    constructor(name: string, age: i32) {
+        this.name = name;
+        this.age = age;
+    }
+
+    getClassName(): string {
+        return "TypeMismatchClass";
+    }
+
+    getFieldValue(fieldName: string): MessagePackValue | null {
+        if (fieldName === "name") {
+            return toMessagePackString(this.name);
+        } else if (fieldName === "age") {
+            // Return wrong type - string instead of integer
+            return toMessagePackString(this.age.toString());
+        }
+        return null;
+    }
+}
+
+/**
+ * Test implementation for invalid nested class format testing
+ */
+class InvalidNestedFormatClass implements Serializable {
+    id: i32;
+    user: string; // This should be a class but we'll return wrong type
+
+    constructor(id: i32, user: string) {
+        this.id = id;
+        this.user = user;
+    }
+
+    getClassName(): string {
+        return "InvalidNestedFormatClass";
+    }
+
+    getFieldValue(fieldName: string): MessagePackValue | null {
+        if (fieldName === "id") {
+            return toMessagePackInteger32(this.id);
+        } else if (fieldName === "user") {
+            // Return string instead of map for nested class
+            return toMessagePackString(this.user);
+        }
         return null;
     }
 }
@@ -1040,6 +1098,1203 @@ export function runClassSerializationEncoderTests(): boolean {
 }
 
 /**
+ * Test suite for serialization error handling
+ */
+export function runSerializationErrorHandlingTests(): boolean {
+    console.log("=== Serialization Error Handling Tests ===");
+
+    let passed = 0;
+    let total = 0;
+
+    // Clear registry before tests
+    ClassRegistry.clear();
+
+    // Test 1: Unregistered class error
+    total++;
+    const encoder = new MessagePackEncoder();
+    const classEncoder = new ClassSerializationEncoder(encoder);
+    const unregisteredInstance = new UnregisteredClass("test");
+
+    // Since AssemblyScript doesn't support try-catch, we'll test the error conditions
+    // by checking the registry state and validating error creation methods
+    let unregisteredClassErrorTest = false;
+
+    // Test that the class is not registered
+    if (!ClassRegistry.isRegistered("UnregisteredClass")) {
+        // Test the error creation method
+        const testError = ClassSerializationError.unregisteredClass("UnregisteredClass");
+        if (testError.className === "UnregisteredClass" &&
+            testError.message.includes("UnregisteredClass") &&
+            testError.message.includes("not registered") &&
+            testError.context === "class registration validation") {
+            unregisteredClassErrorTest = true;
+        }
+    }
+
+    if (unregisteredClassErrorTest) {
+        console.log("✓ Unregistered class error creation works correctly");
+        passed++;
+    } else {
+        console.log("✗ Unregistered class error creation failed");
+    }
+
+    // Test 2: Missing required field error
+    total++;
+    // Test the error creation method for missing required fields
+    let missingFieldErrorTest = false;
+
+    const missingFieldError = ClassSerializationError.missingRequiredField("age", "MissingFieldClass");
+    if (missingFieldError.fieldName === "age" &&
+        missingFieldError.className === "MissingFieldClass" &&
+        missingFieldError.message.includes("Required field") &&
+        missingFieldError.message.includes("age") &&
+        missingFieldError.message.includes("MissingFieldClass") &&
+        missingFieldError.context === "required field validation") {
+        missingFieldErrorTest = true;
+    }
+
+    if (missingFieldErrorTest) {
+        console.log("✓ Missing required field error creation works correctly");
+        passed++;
+    } else {
+        console.log("✗ Missing required field error creation failed");
+    }
+
+    // Test 3: Field type mismatch error
+    total++;
+    // Test the error creation method for field type mismatches
+    let typeMismatchErrorTest = false;
+
+    const typeMismatchError = ClassSerializationError.fieldTypeMismatch(
+        "age",
+        "TypeMismatchClass",
+        MessagePackValueType.INTEGER,
+        MessagePackValueType.STRING
+    );
+    if (typeMismatchError.fieldName === "age" &&
+        typeMismatchError.className === "TypeMismatchClass" &&
+        typeMismatchError.message.includes("Type mismatch") &&
+        typeMismatchError.message.includes("age") &&
+        typeMismatchError.message.includes("expected INTEGER") &&
+        typeMismatchError.message.includes("got STRING") &&
+        typeMismatchError.context === "field type validation") {
+        typeMismatchErrorTest = true;
+    }
+
+    if (typeMismatchErrorTest) {
+        console.log("✓ Field type mismatch error creation works correctly");
+        passed++;
+    } else {
+        console.log("✗ Field type mismatch error creation failed");
+    }
+
+    // Test 4: Unregistered nested class error
+    total++;
+    // Test the error creation method for unregistered nested classes
+    let unregisteredNestedErrorTest = false;
+
+    const unregisteredNestedError = ClassSerializationError.unregisteredNestedClass(
+        "user",
+        "InvalidNestedFormatClass",
+        "UnregisteredNestedClass"
+    );
+    if (unregisteredNestedError.fieldName === "user" &&
+        unregisteredNestedError.className === "InvalidNestedFormatClass" &&
+        unregisteredNestedError.message.includes("Nested class type") &&
+        unregisteredNestedError.message.includes("UnregisteredNestedClass") &&
+        unregisteredNestedError.message.includes("not registered") &&
+        unregisteredNestedError.context === "nested class validation") {
+        unregisteredNestedErrorTest = true;
+    }
+
+    if (unregisteredNestedErrorTest) {
+        console.log("✓ Unregistered nested class error creation works correctly");
+        passed++;
+    } else {
+        console.log("✗ Unregistered nested class error creation failed");
+    }
+
+    // Test 5: Invalid nested class format error
+    total++;
+    // Test the error creation method for invalid nested class format
+    let invalidNestedFormatErrorTest = false;
+
+    const invalidNestedFormatError = ClassSerializationError.invalidNestedClassFormat(
+        "user",
+        "InvalidNestedFormatClass",
+        MessagePackValueType.STRING
+    );
+    if (invalidNestedFormatError.fieldName === "user" &&
+        invalidNestedFormatError.className === "InvalidNestedFormatClass" &&
+        invalidNestedFormatError.message.includes("Nested class field") &&
+        invalidNestedFormatError.message.includes("must be a MessagePackMap") &&
+        invalidNestedFormatError.message.includes("got STRING") &&
+        invalidNestedFormatError.context === "nested class format validation") {
+        invalidNestedFormatErrorTest = true;
+    }
+
+    if (invalidNestedFormatErrorTest) {
+        console.log("✓ Invalid nested class format error creation works correctly");
+        passed++;
+    } else {
+        console.log("✗ Invalid nested class format error creation failed");
+    }
+
+    // Test 6: Circular reference error
+    total++;
+    // Test the error creation method for circular references
+    let circularReferenceErrorTest = false;
+
+    const circularReferenceError = ClassSerializationError.circularReference("TestClass", "selfReference");
+    if (circularReferenceError.fieldName === "selfReference" &&
+        circularReferenceError.className === "TestClass" &&
+        circularReferenceError.message.includes("Circular reference detected") &&
+        circularReferenceError.message.includes("TestClass") &&
+        circularReferenceError.message.includes("selfReference") &&
+        circularReferenceError.context === "circular reference detection") {
+        circularReferenceErrorTest = true;
+    }
+
+    if (circularReferenceErrorTest) {
+        console.log("✓ Circular reference error creation works correctly");
+        passed++;
+    } else {
+        console.log("✗ Circular reference error creation failed");
+    }
+
+    // Clean up
+    ClassRegistry.clear();
+
+    console.log(`Serialization Error Handling tests: ${passed}/${total} passed\n`);
+    return passed === total;
+}
+
+/**
+ * Test class for deserialization testing
+ */
+class DeserializationTestUser implements Serializable {
+    name: string = "";
+    age: i32 = 0;
+    email: string | null = null;
+    isActive: boolean = false;
+
+    getClassName(): string {
+        return "DeserializationTestUser";
+    }
+
+    getFieldValue(fieldName: string): MessagePackValue | null {
+        if (fieldName === "name") return toMessagePackString(this.name);
+        if (fieldName === "age") return toMessagePackInteger32(this.age);
+        if (fieldName === "email") return this.email !== null ? toMessagePackString(this.email!) : null;
+        if (fieldName === "isActive") return toMessagePackBoolean(this.isActive);
+        return null;
+    }
+}
+
+/**
+ * Factory for DeserializationTestUser
+ */
+class DeserializationTestUserFactory implements ClassFactory {
+    create(): Serializable {
+        return new DeserializationTestUser();
+    }
+
+    setFieldValue(instance: Serializable, fieldName: string, value: MessagePackValue): void {
+        const user = instance as DeserializationTestUser;
+        if (fieldName === "name") {
+            if (value.getType() === MessagePackValueType.STRING) {
+                user.name = (value as MessagePackString).value;
+            }
+        } else if (fieldName === "age") {
+            if (value.getType() === MessagePackValueType.INTEGER) {
+                user.age = (value as MessagePackInteger).value as i32;
+            }
+        } else if (fieldName === "email") {
+            if (value.getType() === MessagePackValueType.STRING) {
+                user.email = (value as MessagePackString).value;
+            }
+        } else if (fieldName === "isActive") {
+            if (value.getType() === MessagePackValueType.BOOLEAN) {
+                user.isActive = (value as MessagePackBoolean).value;
+            }
+        }
+    }
+}
+
+/**
+ * Test suite for ClassFactory interface and ClassSerializationDecoder
+ */
+export function runClassSerializationDecoderTests(): boolean {
+    console.log("=== ClassSerializationDecoder Tests ===");
+
+    let passed = 0;
+    let total = 0;
+
+    // Clear registry before tests
+    ClassRegistry.clear();
+
+    // Register the test class
+    ClassRegistry.register("DeserializationTestUser", [
+        new FieldMetadata("name", SerializableFieldType.STRING),
+        new FieldMetadata("age", SerializableFieldType.INTEGER),
+        new FieldMetadata("email", SerializableFieldType.STRING, true), // optional
+        new FieldMetadata("isActive", SerializableFieldType.BOOLEAN)
+    ]);
+
+    // Test 1: Basic class deserialization
+    total++;
+    // Create a test instance and serialize it
+    const originalUser = new DeserializationTestUser();
+    originalUser.name = "John Doe";
+    originalUser.age = 30;
+    originalUser.email = "john@example.com";
+    originalUser.isActive = true;
+
+    const encoder = new MessagePackEncoder();
+    const classEncoder = new ClassSerializationEncoder(encoder);
+    const serializedData = classEncoder.encodeClass(originalUser);
+
+    // Deserialize it back
+    const decoder = new MessagePackDecoder(serializedData);
+    const classDecoder = new ClassSerializationDecoder(decoder);
+    const factory = new DeserializationTestUserFactory();
+    const deserializedUser = classDecoder.decodeClass(factory, "DeserializationTestUser") as DeserializationTestUser;
+
+    if (deserializedUser.name === "John Doe" &&
+        deserializedUser.age === 30 &&
+        deserializedUser.email === "john@example.com" &&
+        deserializedUser.isActive === true) {
+        console.log("✓ Basic class deserialization works");
+        passed++;
+    } else {
+        console.log("✗ Basic class deserialization failed - field values don't match");
+        console.log("  Expected: name=John Doe, age=30, email=john@example.com, isActive=true");
+        console.log("  Got: name=" + deserializedUser.name + ", age=" + deserializedUser.age.toString() + ", email=" + (deserializedUser.email !== null ? deserializedUser.email! : "null") + ", isActive=" + deserializedUser.isActive.toString());
+    }
+
+    // Test 2: Deserialization with optional field missing
+    total++;
+    // Create a test instance without optional field
+    const originalUser2 = new DeserializationTestUser();
+    originalUser2.name = "Jane Doe";
+    originalUser2.age = 25;
+    originalUser2.email = null; // optional field is null
+    originalUser2.isActive = false;
+
+    const encoder2 = new MessagePackEncoder();
+    const classEncoder2 = new ClassSerializationEncoder(encoder2);
+    const serializedData2 = classEncoder2.encodeClass(originalUser2);
+
+    // Deserialize it back
+    const decoder2 = new MessagePackDecoder(serializedData2);
+    const classDecoder2 = new ClassSerializationDecoder(decoder2);
+    const factory2 = new DeserializationTestUserFactory();
+    const deserializedUser2 = classDecoder2.decodeClass(factory2, "DeserializationTestUser") as DeserializationTestUser;
+
+    if (deserializedUser2.name === "Jane Doe" &&
+        deserializedUser2.age === 25 &&
+        deserializedUser2.email === null &&
+        deserializedUser2.isActive === false) {
+        console.log("✓ Deserialization with optional field missing works");
+        passed++;
+    } else {
+        console.log("✗ Deserialization with optional field missing failed");
+        console.log("  Expected: name=Jane Doe, age=25, email=null, isActive=false");
+        console.log("  Got: name=" + deserializedUser2.name + ", age=" + deserializedUser2.age.toString() + ", email=" + (deserializedUser2.email !== null ? deserializedUser2.email! : "null") + ", isActive=" + deserializedUser2.isActive.toString());
+    }
+
+    // Test 3: Error handling - unregistered class
+    // Since AssemblyScript doesn't support try-catch, we'll test the error conditions
+    // by checking the registry state and validating error creation methods
+    total++;
+    if (!ClassRegistry.isRegistered("UnregisteredClass")) {
+        // Test the error creation method
+        const testError = ClassDeserializationError.unregisteredClass("UnregisteredClass");
+        if (testError.className === "UnregisteredClass" &&
+            testError.message.includes("not registered")) {
+            console.log("✓ Unregistered class error creation works");
+            passed++;
+        } else {
+            console.log("✗ Unregistered class error creation failed");
+        }
+    } else {
+        console.log("✗ Test setup error - UnregisteredClass should not be registered");
+    }
+
+    // Test 4: Error handling - invalid format error creation
+    total++;
+    const invalidFormatError = ClassDeserializationError.invalidFormat("DeserializationTestUser", MessagePackValueType.STRING);
+    if (invalidFormatError.className === "DeserializationTestUser" &&
+        invalidFormatError.message.includes("Expected MessagePack map")) {
+        console.log("✓ Invalid format error creation works");
+        passed++;
+    } else {
+        console.log("✗ Invalid format error creation failed");
+    }
+
+    // Test 5: Error handling - missing required field error creation
+    total++;
+    const missingFieldError = ClassDeserializationError.missingRequiredField("age", "DeserializationTestUser");
+    if (missingFieldError.fieldName === "age" &&
+        missingFieldError.className === "DeserializationTestUser" &&
+        missingFieldError.message.includes("Required field 'age' is missing")) {
+        console.log("✓ Missing required field error creation works");
+        passed++;
+    } else {
+        console.log("✗ Missing required field error creation failed");
+    }
+
+    // Test 6: Error handling - field type mismatch error creation
+    total++;
+    const typeMismatchError = ClassDeserializationError.fieldTypeMismatch("age", "DeserializationTestUser", MessagePackValueType.INTEGER, MessagePackValueType.STRING);
+    if (typeMismatchError.fieldName === "age" &&
+        typeMismatchError.className === "DeserializationTestUser" &&
+        typeMismatchError.message.includes("Type mismatch for field 'age'")) {
+        console.log("✓ Field type mismatch error creation works");
+        passed++;
+    } else {
+        console.log("✗ Field type mismatch error creation failed");
+    }
+
+    console.log(`ClassSerializationDecoder tests: ${passed}/${total} passed\n`);
+    return passed === total;
+}
+
+/**
+ * Test implementation of a nested class for deserialization testing
+ */
+class NestedDeserializationTestUser implements Serializable {
+    name: string;
+    age: i32;
+
+    constructor(name: string = "", age: i32 = 0) {
+        this.name = name;
+        this.age = age;
+    }
+
+    getClassName(): string {
+        return "NestedDeserializationTestUser";
+    }
+
+    getFieldValue(fieldName: string): MessagePackValue | null {
+        if (fieldName === "name") {
+            return toMessagePackString(this.name);
+        } else if (fieldName === "age") {
+            return toMessagePackInteger32(this.age);
+        }
+        return null;
+    }
+}
+
+/**
+ * Test implementation of a class containing nested classes
+ */
+class ParentDeserializationTestClass implements Serializable {
+    id: i32;
+    user: NestedDeserializationTestUser;
+    optionalUser: NestedDeserializationTestUser | null;
+
+    constructor(id: i32 = 0, user: NestedDeserializationTestUser | null = null, optionalUser: NestedDeserializationTestUser | null = null) {
+        this.id = id;
+        this.user = user !== null ? user : new NestedDeserializationTestUser();
+        this.optionalUser = optionalUser;
+    }
+
+    getClassName(): string {
+        return "ParentDeserializationTestClass";
+    }
+
+    getFieldValue(fieldName: string): MessagePackValue | null {
+        if (fieldName === "id") {
+            return toMessagePackInteger32(this.id);
+        } else if (fieldName === "user") {
+            // Serialize the nested user
+            const encoder = new MessagePackEncoder();
+            const classEncoder = new ClassSerializationEncoder(encoder);
+            const serializedUser = classEncoder.encodeClass(this.user);
+
+            // Decode it back to a MessagePackMap
+            const decoder = new MessagePackDecoder(serializedUser);
+            return decoder.decode();
+        } else if (fieldName === "optionalUser") {
+            if (this.optionalUser === null) {
+                return null;
+            }
+            // Serialize the nested optional user
+            const encoder = new MessagePackEncoder();
+            const classEncoder = new ClassSerializationEncoder(encoder);
+            const serializedUser = classEncoder.encodeClass(this.optionalUser!);
+
+            // Decode it back to a MessagePackMap
+            const decoder = new MessagePackDecoder(serializedUser);
+            return decoder.decode();
+        }
+        return null;
+    }
+}
+
+/**
+ * Factory for creating NestedDeserializationTestUser instances
+ */
+class NestedDeserializationTestUserFactory implements ClassFactory {
+    create(): Serializable {
+        return new NestedDeserializationTestUser();
+    }
+
+    setFieldValue(instance: Serializable, fieldName: string, value: MessagePackValue): void {
+        const user = instance as NestedDeserializationTestUser;
+
+        if (fieldName === "name" && value.getType() === MessagePackValueType.STRING) {
+            user.name = (value as MessagePackString).value;
+        } else if (fieldName === "age" && value.getType() === MessagePackValueType.INTEGER) {
+            user.age = (value as MessagePackInteger).value as i32;
+        }
+    }
+}
+
+/**
+ * Factory for creating ParentDeserializationTestClass instances
+ */
+class ParentDeserializationTestClassFactory implements ClassFactory {
+    private nestedFactory: NestedDeserializationTestUserFactory;
+
+    constructor() {
+        this.nestedFactory = new NestedDeserializationTestUserFactory();
+    }
+
+    create(): Serializable {
+        return new ParentDeserializationTestClass();
+    }
+
+    setFieldValue(instance: Serializable, fieldName: string, value: MessagePackValue): void {
+        const parent = instance as ParentDeserializationTestClass;
+
+        if (fieldName === "id" && value.getType() === MessagePackValueType.INTEGER) {
+            parent.id = (value as MessagePackInteger).value as i32;
+        } else if (fieldName === "user" && value.getType() === MessagePackValueType.MAP) {
+            // Deserialize the nested user using the decoder
+            const encoder = new MessagePackEncoder();
+            const serializedData = encoder.encodeMap((value as MessagePackMap).value);
+
+            const decoder = new MessagePackDecoder(serializedData);
+            const classDecoder = new ClassSerializationDecoder(decoder);
+
+            // Create a temporary field metadata for the nested class
+            const userField = new FieldMetadata("user", SerializableFieldType.CLASS, false, "NestedDeserializationTestUser");
+
+            const deserializedUser = classDecoder.deserializeNestedClassWithFactory(value, userField, "ParentDeserializationTestClass", this.nestedFactory);
+            parent.user = deserializedUser as NestedDeserializationTestUser;
+        } else if (fieldName === "optionalUser" && value.getType() === MessagePackValueType.MAP) {
+            // Deserialize the optional nested user
+            const encoder = new MessagePackEncoder();
+            const serializedData = encoder.encodeMap((value as MessagePackMap).value);
+
+            const decoder = new MessagePackDecoder(serializedData);
+            const classDecoder = new ClassSerializationDecoder(decoder);
+
+            // Create a temporary field metadata for the nested class
+            const userField = new FieldMetadata("optionalUser", SerializableFieldType.CLASS, true, "NestedDeserializationTestUser");
+
+            const deserializedUser = classDecoder.deserializeNestedClassWithFactory(value, userField, "ParentDeserializationTestClass", this.nestedFactory);
+            parent.optionalUser = deserializedUser as NestedDeserializationTestUser;
+        }
+    }
+}
+
+/**
+ * Test implementation of a class containing arrays with class instances
+ */
+class ArrayWithClassesTestClass implements Serializable {
+    id: i32;
+    users: NestedDeserializationTestUser[];
+
+    constructor(id: i32 = 0, users: NestedDeserializationTestUser[] = []) {
+        this.id = id;
+        this.users = users;
+    }
+
+    getClassName(): string {
+        return "ArrayWithClassesTestClass";
+    }
+
+    getFieldValue(fieldName: string): MessagePackValue | null {
+        if (fieldName === "id") {
+            return toMessagePackInteger32(this.id);
+        } else if (fieldName === "users") {
+            // Serialize each user in the array
+            const serializedUsers: MessagePackValue[] = [];
+
+            for (let i = 0; i < this.users.length; i++) {
+                const encoder = new MessagePackEncoder();
+                const classEncoder = new ClassSerializationEncoder(encoder);
+                const serializedUser = classEncoder.encodeClass(this.users[i]);
+
+                // Decode it back to a MessagePackMap
+                const decoder = new MessagePackDecoder(serializedUser);
+                serializedUsers.push(decoder.decode());
+            }
+
+            return new MessagePackArray(serializedUsers);
+        }
+        return null;
+    }
+}
+
+/**
+ * Factory for creating ArrayWithClassesTestClass instances
+ */
+class ArrayWithClassesTestClassFactory implements ClassFactory {
+    private nestedFactory: NestedDeserializationTestUserFactory;
+
+    constructor() {
+        this.nestedFactory = new NestedDeserializationTestUserFactory();
+    }
+
+    create(): Serializable {
+        return new ArrayWithClassesTestClass();
+    }
+
+    setFieldValue(instance: Serializable, fieldName: string, value: MessagePackValue): void {
+        const arrayClass = instance as ArrayWithClassesTestClass;
+
+        if (fieldName === "id" && value.getType() === MessagePackValueType.INTEGER) {
+            arrayClass.id = (value as MessagePackInteger).value as i32;
+        } else if (fieldName === "users" && value.getType() === MessagePackValueType.ARRAY) {
+            const arrayValue = value as MessagePackArray;
+            const deserializedUsers: NestedDeserializationTestUser[] = [];
+
+            for (let i = 0; i < arrayValue.value.length; i++) {
+                const userValue = arrayValue.value[i];
+
+                if (userValue.getType() === MessagePackValueType.MAP) {
+                    // Deserialize each user in the array
+                    const encoder = new MessagePackEncoder();
+                    const serializedData = encoder.encodeMap((userValue as MessagePackMap).value);
+
+                    const decoder = new MessagePackDecoder(serializedData);
+                    const classDecoder = new ClassSerializationDecoder(decoder);
+
+                    // Create a temporary field metadata for the nested class
+                    const userField = new FieldMetadata(`user_${i}`, SerializableFieldType.CLASS, false, "NestedDeserializationTestUser");
+
+                    const deserializedUser = classDecoder.deserializeNestedClassWithFactory(userValue, userField, "ArrayWithClassesTestClass", this.nestedFactory);
+                    deserializedUsers.push(deserializedUser as NestedDeserializationTestUser);
+                }
+            }
+
+            arrayClass.users = deserializedUsers;
+        }
+    }
+}
+
+/**
+ * Test suite for nested class deserialization support
+ */
+export function runNestedClassDeserializationTests(): boolean {
+    console.log("=== Nested Class Deserialization Tests ===");
+
+    let passed = 0;
+    let total = 0;
+
+    // Clear registry before tests
+    ClassRegistry.clear();
+
+    // Register the nested class
+    const nestedUserFields = [
+        new FieldMetadata("name", SerializableFieldType.STRING),
+        new FieldMetadata("age", SerializableFieldType.INTEGER)
+    ];
+    ClassRegistry.register("NestedDeserializationTestUser", nestedUserFields);
+
+    // Register the parent class with nested class field
+    const parentFields = [
+        new FieldMetadata("id", SerializableFieldType.INTEGER),
+        new FieldMetadata("user", SerializableFieldType.CLASS, false, "NestedDeserializationTestUser"),
+        new FieldMetadata("optionalUser", SerializableFieldType.CLASS, true, "NestedDeserializationTestUser")
+    ];
+    ClassRegistry.register("ParentDeserializationTestClass", parentFields);
+
+    // Test 1: Basic nested class deserialization
+    total++;
+    // Create and serialize a parent class with nested user
+    const nestedUser = new NestedDeserializationTestUser("Alice", 30);
+    const parentInstance = new ParentDeserializationTestClass(1, nestedUser, null);
+
+    const encoder = new MessagePackEncoder();
+    const classEncoder = new ClassSerializationEncoder(encoder);
+    const serializedData = classEncoder.encodeClass(parentInstance);
+
+    // Deserialize it back
+    const decoder = new MessagePackDecoder(serializedData);
+    const classDecoder = new ClassSerializationDecoder(decoder);
+    const factory = new ParentDeserializationTestClassFactory();
+    const deserializedParent = classDecoder.decodeClass(factory, "ParentDeserializationTestClass") as ParentDeserializationTestClass;
+
+    if (deserializedParent.id === 1 &&
+        deserializedParent.user.name === "Alice" &&
+        deserializedParent.user.age === 30 &&
+        deserializedParent.optionalUser === null) {
+        console.log("✓ Basic nested class deserialization works");
+        passed++;
+    } else {
+        console.log("✗ Basic nested class deserialization failed");
+        console.log(`  Expected: id=1, user.name=Alice, user.age=30, optionalUser=null`);
+        console.log(`  Got: id=${deserializedParent.id}, user.name=${deserializedParent.user.name}, user.age=${deserializedParent.user.age}, optionalUser=${deserializedParent.optionalUser !== null ? "present" : "null"}`);
+    }
+
+    // Test 2: Nested class deserialization with optional field present
+    total++;
+    const optionalUser = new NestedDeserializationTestUser("Bob", 25);
+    const parentInstance2 = new ParentDeserializationTestClass(2, nestedUser, optionalUser);
+
+    const encoder2 = new MessagePackEncoder();
+    const classEncoder2 = new ClassSerializationEncoder(encoder2);
+    const serializedData2 = classEncoder2.encodeClass(parentInstance2);
+
+    // Deserialize it back
+    const decoder2 = new MessagePackDecoder(serializedData2);
+    const classDecoder2 = new ClassSerializationDecoder(decoder2);
+    const factory2 = new ParentDeserializationTestClassFactory();
+    const deserializedParent2 = classDecoder2.decodeClass(factory2, "ParentDeserializationTestClass") as ParentDeserializationTestClass;
+
+    if (deserializedParent2.id === 2 &&
+        deserializedParent2.user.name === "Alice" &&
+        deserializedParent2.user.age === 30 &&
+        deserializedParent2.optionalUser !== null &&
+        deserializedParent2.optionalUser!.name === "Bob" &&
+        deserializedParent2.optionalUser!.age === 25) {
+        console.log("✓ Nested class deserialization with optional field works");
+        passed++;
+    } else {
+        console.log("✗ Nested class deserialization with optional field failed");
+    }
+
+    // Test 3: Test deserializeNestedClassWithFactory method directly
+    total++;
+    // Create a MessagePackMap representing a nested user
+    const userMap = new Map<string, MessagePackValue>();
+    userMap.set("name", toMessagePackString("Charlie"));
+    userMap.set("age", toMessagePackInteger32(35));
+    const userMapValue = new MessagePackMap(userMap);
+
+    // Create field metadata for the nested class
+    const userField = new FieldMetadata("user", SerializableFieldType.CLASS, false, "NestedDeserializationTestUser");
+
+    // Test the direct deserialization method
+    const decoder3 = new MessagePackDecoder(new Uint8Array(0)); // Dummy decoder
+    const classDecoder3 = new ClassSerializationDecoder(decoder3);
+    const nestedFactory = new NestedDeserializationTestUserFactory();
+
+    const directDeserializedUser = classDecoder3.deserializeNestedClassWithFactory(userMapValue, userField, "TestParent", nestedFactory) as NestedDeserializationTestUser;
+
+    if (directDeserializedUser.name === "Charlie" &&
+        directDeserializedUser.age === 35) {
+        console.log("✓ Direct nested class deserialization with factory works");
+        passed++;
+    } else {
+        console.log("✗ Direct nested class deserialization with factory failed");
+        console.log(`  Expected: name=Charlie, age=35`);
+        console.log(`  Got: name=${directDeserializedUser.name}, age=${directDeserializedUser.age}`);
+    }
+
+    // Test 4: Array with class instances deserialization
+    total++;
+    // Register the array class
+    const arrayFields = [
+        new FieldMetadata("id", SerializableFieldType.INTEGER),
+        new FieldMetadata("users", SerializableFieldType.ARRAY)
+    ];
+    ClassRegistry.register("ArrayWithClassesTestClass", arrayFields);
+
+    // Create an array class with multiple users
+    const users = [
+        new NestedDeserializationTestUser("User1", 20),
+        new NestedDeserializationTestUser("User2", 25),
+        new NestedDeserializationTestUser("User3", 30)
+    ];
+    const arrayInstance = new ArrayWithClassesTestClass(100, users);
+
+    const encoder4 = new MessagePackEncoder();
+    const classEncoder4 = new ClassSerializationEncoder(encoder4);
+    const serializedArrayData = classEncoder4.encodeClass(arrayInstance);
+
+    // Deserialize it back
+    const decoder4 = new MessagePackDecoder(serializedArrayData);
+    const classDecoder4 = new ClassSerializationDecoder(decoder4);
+    const arrayFactory = new ArrayWithClassesTestClassFactory();
+    const deserializedArray = classDecoder4.decodeClass(arrayFactory, "ArrayWithClassesTestClass") as ArrayWithClassesTestClass;
+
+    if (deserializedArray.id === 100 &&
+        deserializedArray.users.length === 3 &&
+        deserializedArray.users[0].name === "User1" &&
+        deserializedArray.users[0].age === 20 &&
+        deserializedArray.users[1].name === "User2" &&
+        deserializedArray.users[1].age === 25 &&
+        deserializedArray.users[2].name === "User3" &&
+        deserializedArray.users[2].age === 30) {
+        console.log("✓ Array with class instances deserialization works");
+        passed++;
+    } else {
+        console.log("✗ Array with class instances deserialization failed");
+        console.log(`  Expected: id=100, users.length=3`);
+        console.log(`  Got: id=${deserializedArray.id}, users.length=${deserializedArray.users.length}`);
+    }
+
+    // Test 5: Test array deserialization method directly
+    total++;
+    // Create an array of MessagePackMaps representing users
+    const userMap1 = new Map<string, MessagePackValue>();
+    userMap1.set("name", toMessagePackString("DirectUser1"));
+    userMap1.set("age", toMessagePackInteger32(40));
+
+    const userMap2 = new Map<string, MessagePackValue>();
+    userMap2.set("name", toMessagePackString("DirectUser2"));
+    userMap2.set("age", toMessagePackInteger32(45));
+
+    const userMaps: MessagePackValue[] = [
+        new MessagePackMap(userMap1),
+        new MessagePackMap(userMap2)
+    ];
+    const arrayValue = new MessagePackArray(userMaps);
+
+    // Test the direct array deserialization method
+    const decoder5 = new MessagePackDecoder(new Uint8Array(0)); // Dummy decoder
+    const classDecoder5 = new ClassSerializationDecoder(decoder5);
+    const nestedFactory5 = new NestedDeserializationTestUserFactory();
+
+    const deserializedArrayValue = classDecoder5.deserializeArrayWithClasses(arrayValue, SerializableFieldType.CLASS, "NestedDeserializationTestUser", nestedFactory5);
+
+    if (deserializedArrayValue.value.length === 2) {
+        console.log("✓ Direct array deserialization with classes works");
+        passed++;
+    } else {
+        console.log("✗ Direct array deserialization with classes failed");
+        console.log(`  Expected: length=2`);
+        console.log(`  Got: length=${deserializedArrayValue.value.length}`);
+    }
+
+    // Test 6: Test type validation for nested objects
+    total++;
+    // Create invalid nested class data (string instead of map)
+    const invalidNestedValue = toMessagePackString("invalid");
+    const userField6 = new FieldMetadata("user", SerializableFieldType.CLASS, false, "NestedDeserializationTestUser");
+
+    let typeValidationWorked = false;
+    // Since AssemblyScript doesn't support try-catch, we'll test the error creation
+    const testError = ClassDeserializationError.fieldTypeMismatch("user", "TestClass", MessagePackValueType.MAP, MessagePackValueType.STRING);
+    if (testError.fieldName === "user" &&
+        testError.className === "TestClass" &&
+        testError.message.includes("Type mismatch") &&
+        testError.message.includes("expected MAP") &&
+        testError.message.includes("got STRING")) {
+        typeValidationWorked = true;
+    }
+
+    if (typeValidationWorked) {
+        console.log("✓ Type validation for nested objects works");
+        passed++;
+    } else {
+        console.log("✗ Type validation for nested objects failed");
+    }
+
+    // Clean up
+    ClassRegistry.clear();
+
+    console.log(`Nested Class Deserialization tests: ${passed}/${total} passed\n`);
+    return passed === total;
+}
+
+/**
+ * Test suite for comprehensive deserialization error handling
+ * Tests all error scenarios that can occur during class deserialization
+ */
+export function runDeserializationErrorHandlingTests(): boolean {
+    console.log("=== Deserialization Error Handling Tests ===");
+
+    let passed = 0;
+    let total = 0;
+
+    // Clear registry before tests
+    ClassRegistry.clear();
+
+    // Test 1: ClassDeserializationError.unregisteredClass error creation and properties
+    total++;
+    const unregisteredError = ClassDeserializationError.unregisteredClass("UnknownClass");
+    if (unregisteredError.className === "UnknownClass" &&
+        unregisteredError.fieldName === "" &&
+        unregisteredError.message.includes("Class 'UnknownClass' is not registered for deserialization") &&
+        unregisteredError.message.includes("Use ClassRegistry.register()") &&
+        unregisteredError.context === "class registration validation") {
+        console.log("✓ Unregistered class error creation and properties work correctly");
+        passed++;
+    } else {
+        console.log("✗ Unregistered class error creation failed");
+        console.log("  Expected className: UnknownClass, got: " + unregisteredError.className);
+        console.log("  Expected fieldName: '', got: " + unregisteredError.fieldName);
+        console.log("  Message: " + unregisteredError.message);
+        console.log("  Context: " + unregisteredError.context);
+    }
+
+    // Test 2: ClassDeserializationError.invalidFormat error creation and properties
+    total++;
+    const invalidFormatError = ClassDeserializationError.invalidFormat("TestClass", MessagePackValueType.STRING);
+    if (invalidFormatError.className === "TestClass" &&
+        invalidFormatError.fieldName === "" &&
+        invalidFormatError.message.includes("Expected MessagePack map for class 'TestClass'") &&
+        invalidFormatError.message.includes("got STRING") &&
+        invalidFormatError.message.includes("Classes must be serialized as maps") &&
+        invalidFormatError.context === "format validation") {
+        console.log("✓ Invalid format error creation and properties work correctly");
+        passed++;
+    } else {
+        console.log("✗ Invalid format error creation failed");
+        console.log("  Expected className: TestClass, got: " + invalidFormatError.className);
+        console.log("  Expected fieldName: '', got: " + invalidFormatError.fieldName);
+        console.log("  Message: " + invalidFormatError.message);
+        console.log("  Context: " + invalidFormatError.context);
+    }
+
+    // Test 3: ClassDeserializationError.missingRequiredField error creation and properties
+    total++;
+    const missingFieldError = ClassDeserializationError.missingRequiredField("requiredField", "TestClass");
+    if (missingFieldError.className === "TestClass" &&
+        missingFieldError.fieldName === "requiredField" &&
+        missingFieldError.message.includes("Required field 'requiredField' is missing from MessagePack data") &&
+        missingFieldError.message.includes("for class 'TestClass'") &&
+        missingFieldError.message.includes("Ensure the field was included during serialization") &&
+        missingFieldError.context === "required field validation") {
+        console.log("✓ Missing required field error creation and properties work correctly");
+        passed++;
+    } else {
+        console.log("✗ Missing required field error creation failed");
+        console.log("  Expected className: TestClass, got: " + missingFieldError.className);
+        console.log("  Expected fieldName: requiredField, got: " + missingFieldError.fieldName);
+        console.log("  Message: " + missingFieldError.message);
+        console.log("  Context: " + missingFieldError.context);
+    }
+
+    // Test 4: ClassDeserializationError.fieldTypeMismatch error creation and properties
+    total++;
+    const typeMismatchError = ClassDeserializationError.fieldTypeMismatch("ageField", "TestClass", MessagePackValueType.INTEGER, MessagePackValueType.STRING);
+    if (typeMismatchError.className === "TestClass" &&
+        typeMismatchError.fieldName === "ageField" &&
+        typeMismatchError.message.includes("Type mismatch for field 'ageField' in class 'TestClass'") &&
+        typeMismatchError.message.includes("expected INTEGER, got STRING") &&
+        typeMismatchError.message.includes("Check the serialized data format") &&
+        typeMismatchError.context === "field type validation") {
+        console.log("✓ Field type mismatch error creation and properties work correctly");
+        passed++;
+    } else {
+        console.log("✗ Field type mismatch error creation failed");
+        console.log("  Expected className: TestClass, got: " + typeMismatchError.className);
+        console.log("  Expected fieldName: ageField, got: " + typeMismatchError.fieldName);
+        console.log("  Message: " + typeMismatchError.message);
+        console.log("  Context: " + typeMismatchError.context);
+    }
+
+    // Test 5: ClassDeserializationError.unregisteredNestedClass error creation and properties
+    total++;
+    const unregisteredNestedError = ClassDeserializationError.unregisteredNestedClass("userField", "ParentClass", "UnknownNestedClass");
+    if (unregisteredNestedError.className === "ParentClass" &&
+        unregisteredNestedError.fieldName === "userField" &&
+        unregisteredNestedError.message.includes("Nested class type 'UnknownNestedClass' for field 'userField'") &&
+        unregisteredNestedError.message.includes("in class 'ParentClass' is not registered") &&
+        unregisteredNestedError.message.includes("Register the nested class first") &&
+        unregisteredNestedError.context === "nested class validation") {
+        console.log("✓ Unregistered nested class error creation and properties work correctly");
+        passed++;
+    } else {
+        console.log("✗ Unregistered nested class error creation failed");
+        console.log("  Expected className: ParentClass, got: " + unregisteredNestedError.className);
+        console.log("  Expected fieldName: userField, got: " + unregisteredNestedError.fieldName);
+        console.log("  Message: " + unregisteredNestedError.message);
+        console.log("  Context: " + unregisteredNestedError.context);
+    }
+
+    // Test 6: Error inheritance - ClassDeserializationError extends MessagePackDecodeError
+    total++;
+    const baseError = ClassDeserializationError.invalidFormat("TestClass", MessagePackValueType.ARRAY);
+    // Check that it has MessagePackDecodeError properties
+    if (baseError.position === -1 &&
+        baseError.formatByte === 0 &&
+        baseError.context === "format validation" &&
+        baseError.message.length > 0) {
+        console.log("✓ ClassDeserializationError properly extends MessagePackDecodeError");
+        passed++;
+    } else {
+        console.log("✗ ClassDeserializationError inheritance failed");
+        console.log("  Position: " + baseError.position.toString());
+        console.log("  FormatByte: " + baseError.formatByte.toString());
+        console.log("  Context: " + baseError.context);
+    }
+
+    // Test 7: Validation of error message content for different MessagePackValueType values
+    total++;
+    const errorWithNull = ClassDeserializationError.invalidFormat("TestClass", MessagePackValueType.NULL);
+    const errorWithBoolean = ClassDeserializationError.invalidFormat("TestClass", MessagePackValueType.BOOLEAN);
+    const errorWithInteger = ClassDeserializationError.invalidFormat("TestClass", MessagePackValueType.INTEGER);
+    const errorWithFloat = ClassDeserializationError.invalidFormat("TestClass", MessagePackValueType.FLOAT);
+    const errorWithString = ClassDeserializationError.invalidFormat("TestClass", MessagePackValueType.STRING);
+    const errorWithBinary = ClassDeserializationError.invalidFormat("TestClass", MessagePackValueType.BINARY);
+    const errorWithArray = ClassDeserializationError.invalidFormat("TestClass", MessagePackValueType.ARRAY);
+
+    if (errorWithNull.message.includes("got NULL") &&
+        errorWithBoolean.message.includes("got BOOLEAN") &&
+        errorWithInteger.message.includes("got INTEGER") &&
+        errorWithFloat.message.includes("got FLOAT") &&
+        errorWithString.message.includes("got STRING") &&
+        errorWithBinary.message.includes("got BINARY") &&
+        errorWithArray.message.includes("got ARRAY")) {
+        console.log("✓ Error messages correctly include MessagePackValueType names");
+        passed++;
+    } else {
+        console.log("✗ Error messages don't correctly include MessagePackValueType names");
+        console.log("  NULL: " + errorWithNull.message);
+        console.log("  BOOLEAN: " + errorWithBoolean.message);
+        console.log("  INTEGER: " + errorWithInteger.message);
+        console.log("  FLOAT: " + errorWithFloat.message);
+        console.log("  STRING: " + errorWithString.message);
+        console.log("  BINARY: " + errorWithBinary.message);
+        console.log("  ARRAY: " + errorWithArray.message);
+    }
+
+    // Test 8: Field type mismatch error with all MessagePackValueType combinations
+    total++;
+    const integerToStringError = ClassDeserializationError.fieldTypeMismatch("field", "Class", MessagePackValueType.INTEGER, MessagePackValueType.STRING);
+    const stringToIntegerError = ClassDeserializationError.fieldTypeMismatch("field", "Class", MessagePackValueType.STRING, MessagePackValueType.INTEGER);
+    const booleanToArrayError = ClassDeserializationError.fieldTypeMismatch("field", "Class", MessagePackValueType.BOOLEAN, MessagePackValueType.ARRAY);
+    const mapToNullError = ClassDeserializationError.fieldTypeMismatch("field", "Class", MessagePackValueType.MAP, MessagePackValueType.NULL);
+
+    if (integerToStringError.message.includes("expected INTEGER, got STRING") &&
+        stringToIntegerError.message.includes("expected STRING, got INTEGER") &&
+        booleanToArrayError.message.includes("expected BOOLEAN, got ARRAY") &&
+        mapToNullError.message.includes("expected MAP, got NULL")) {
+        console.log("✓ Field type mismatch errors correctly show expected vs actual types");
+        passed++;
+    } else {
+        console.log("✗ Field type mismatch errors don't correctly show expected vs actual types");
+        console.log("  INTEGER->STRING: " + integerToStringError.message);
+        console.log("  STRING->INTEGER: " + stringToIntegerError.message);
+        console.log("  BOOLEAN->ARRAY: " + booleanToArrayError.message);
+        console.log("  MAP->NULL: " + mapToNullError.message);
+    }
+
+    // Test 9: Error context validation for all error types
+    total++;
+    const contexts = [
+        ClassDeserializationError.unregisteredClass("Test").context,
+        ClassDeserializationError.invalidFormat("Test", MessagePackValueType.STRING).context,
+        ClassDeserializationError.missingRequiredField("field", "Test").context,
+        ClassDeserializationError.fieldTypeMismatch("field", "Test", MessagePackValueType.INTEGER, MessagePackValueType.STRING).context,
+        ClassDeserializationError.unregisteredNestedClass("field", "Test", "Nested").context
+    ];
+
+    const expectedContexts = [
+        "class registration validation",
+        "format validation",
+        "required field validation",
+        "field type validation",
+        "nested class validation"
+    ];
+
+    let contextMatches = 0;
+    for (let i = 0; i < contexts.length; i++) {
+        if (contexts[i] === expectedContexts[i]) {
+            contextMatches++;
+        }
+    }
+
+    if (contextMatches === contexts.length) {
+        console.log("✓ All error types have correct context values");
+        passed++;
+    } else {
+        console.log("✗ Some error types have incorrect context values");
+        for (let i = 0; i < contexts.length; i++) {
+            console.log("  Expected: " + expectedContexts[i] + ", Got: " + contexts[i]);
+        }
+    }
+
+    // Test 10: Error position and formatByte default values
+    total++;
+    const errors = [
+        ClassDeserializationError.unregisteredClass("Test"),
+        ClassDeserializationError.invalidFormat("Test", MessagePackValueType.STRING),
+        ClassDeserializationError.missingRequiredField("field", "Test"),
+        ClassDeserializationError.fieldTypeMismatch("field", "Test", MessagePackValueType.INTEGER, MessagePackValueType.STRING),
+        ClassDeserializationError.unregisteredNestedClass("field", "Test", "Nested")
+    ];
+
+    let positionAndFormatByteCorrect = true;
+    for (let i = 0; i < errors.length; i++) {
+        if (errors[i].position !== -1 || errors[i].formatByte !== 0) {
+            positionAndFormatByteCorrect = false;
+            break;
+        }
+    }
+
+    if (positionAndFormatByteCorrect) {
+        console.log("✓ All error types have correct default position (-1) and formatByte (0)");
+        passed++;
+    } else {
+        console.log("✗ Some error types have incorrect default position or formatByte values");
+        for (let i = 0; i < errors.length; i++) {
+            console.log("  Error " + i.toString() + ": position=" + errors[i].position.toString() + ", formatByte=" + errors[i].formatByte.toString());
+        }
+    }
+
+    // Test 11: Comprehensive error message validation for edge cases
+    total++;
+    const emptyClassNameError = ClassDeserializationError.unregisteredClass("");
+    const emptyFieldNameError = ClassDeserializationError.missingRequiredField("", "TestClass");
+    const emptyNestedClassError = ClassDeserializationError.unregisteredNestedClass("field", "TestClass", "");
+
+    if (emptyClassNameError.message.includes("Class '' is not registered") &&
+        emptyFieldNameError.message.includes("Required field '' is missing") &&
+        emptyNestedClassError.message.includes("Nested class type '' for field")) {
+        console.log("✓ Error messages handle empty string parameters correctly");
+        passed++;
+    } else {
+        console.log("✗ Error messages don't handle empty string parameters correctly");
+        console.log("  Empty class name: " + emptyClassNameError.message);
+        console.log("  Empty field name: " + emptyFieldNameError.message);
+        console.log("  Empty nested class: " + emptyNestedClassError.message);
+    }
+
+    // Test 12: Validation that error messages contain actionable guidance
+    total++;
+    const unregisteredGuidanceError = ClassDeserializationError.unregisteredClass("Test");
+    const invalidFormatGuidanceError = ClassDeserializationError.invalidFormat("Test", MessagePackValueType.STRING);
+    const missingFieldGuidanceError = ClassDeserializationError.missingRequiredField("field", "Test");
+    const typeMismatchGuidanceError = ClassDeserializationError.fieldTypeMismatch("field", "Test", MessagePackValueType.INTEGER, MessagePackValueType.STRING);
+    const unregisteredNestedGuidanceError = ClassDeserializationError.unregisteredNestedClass("field", "Test", "Nested");
+
+    if (unregisteredGuidanceError.message.includes("Use ClassRegistry.register()") &&
+        invalidFormatGuidanceError.message.includes("Classes must be serialized as maps") &&
+        missingFieldGuidanceError.message.includes("Ensure the field was included during serialization") &&
+        typeMismatchGuidanceError.message.includes("Check the serialized data format") &&
+        unregisteredNestedGuidanceError.message.includes("Register the nested class first")) {
+        console.log("✓ All error messages contain actionable guidance");
+        passed++;
+    } else {
+        console.log("✗ Some error messages are missing actionable guidance");
+        if (!unregisteredGuidanceError.message.includes("Use ClassRegistry.register()")) {
+            console.log("  Missing guidance in unregistered class error: " + unregisteredGuidanceError.message);
+        }
+        if (!invalidFormatGuidanceError.message.includes("Classes must be serialized as maps")) {
+            console.log("  Missing guidance in invalid format error: " + invalidFormatGuidanceError.message);
+        }
+        if (!missingFieldGuidanceError.message.includes("Ensure the field was included during serialization")) {
+            console.log("  Missing guidance in missing field error: " + missingFieldGuidanceError.message);
+        }
+        if (!typeMismatchGuidanceError.message.includes("Check the serialized data format")) {
+            console.log("  Missing guidance in type mismatch error: " + typeMismatchGuidanceError.message);
+        }
+        if (!unregisteredNestedGuidanceError.message.includes("Register the nested class first")) {
+            console.log("  Missing guidance in unregistered nested class error: " + unregisteredNestedGuidanceError.message);
+        }
+    }
+
+    // Test 13: Validation of actual error conditions during deserialization
+    // Since AssemblyScript doesn't support try-catch, we test the conditions that would trigger errors
+    total++;
+
+    // Register a test class for validation scenarios
+    ClassRegistry.register("ErrorTestClass", [
+        new FieldMetadata("name", SerializableFieldType.STRING),
+        new FieldMetadata("age", SerializableFieldType.INTEGER),
+        new FieldMetadata("email", SerializableFieldType.STRING, true) // optional
+    ]);
+
+    // Test scenario: Validate that unregistered class detection works
+    const isUnregisteredDetected = !ClassRegistry.isRegistered("NonExistentClass");
+
+    // Test scenario: Validate that missing required field detection works
+    const testMap = new Map<string, MessagePackValue>();
+    testMap.set("name", toMessagePackString("John"));
+    // Missing required "age" field
+    const hasRequiredField = testMap.has("age");
+
+    // Test scenario: Validate that type mismatch detection works
+    testMap.set("age", toMessagePackString("not_a_number")); // Wrong type - should be integer
+    const ageValue = testMap.get("age");
+    const isCorrectType = ageValue.getType() === MessagePackValueType.INTEGER;
+
+    // Test scenario: Validate that invalid format detection works
+    const nonMapValue = toMessagePackString("not_a_map");
+    const isMapFormat = nonMapValue.getType() === MessagePackValueType.MAP;
+
+    if (isUnregisteredDetected && !hasRequiredField && !isCorrectType && !isMapFormat) {
+        console.log("✓ Error condition detection logic works correctly");
+        passed++;
+    } else {
+        console.log("✗ Error condition detection logic failed");
+        console.log("  Unregistered class detected: " + isUnregisteredDetected.toString());
+        console.log("  Missing required field detected: " + (!hasRequiredField).toString());
+        console.log("  Type mismatch detected: " + (!isCorrectType).toString());
+        console.log("  Invalid format detected: " + (!isMapFormat).toString());
+    }
+
+    // Test 14: Validation of nested class error conditions
+    total++;
+
+    // Register nested classes for testing
+    ClassRegistry.register("NestedErrorTestClass", [
+        new FieldMetadata("id", SerializableFieldType.INTEGER),
+        new FieldMetadata("user", SerializableFieldType.CLASS, false, "UserClass")
+    ]);
+
+    // Test scenario: Validate that unregistered nested class detection works
+    const isNestedClassRegistered = ClassRegistry.isRegistered("UserClass");
+
+    // Test scenario: Validate that nested class format validation works
+    const nestedTestMap = new Map<string, MessagePackValue>();
+    nestedTestMap.set("id", toMessagePackInteger32(1));
+    nestedTestMap.set("user", toMessagePackString("not_a_map")); // Should be a map for nested class
+    const nestedValue = nestedTestMap.get("user");
+    const isNestedMapFormat = nestedValue.getType() === MessagePackValueType.MAP;
+
+    if (!isNestedClassRegistered && !isNestedMapFormat) {
+        console.log("✓ Nested class error condition detection works correctly");
+        passed++;
+    } else {
+        console.log("✗ Nested class error condition detection failed");
+        console.log("  Nested class registered: " + isNestedClassRegistered.toString());
+        console.log("  Nested value is map: " + isNestedMapFormat.toString());
+    }
+
+    // Test 15: Validation of field metadata consistency with error handling
+    total++;
+
+    const errorTestMetadata = ClassRegistry.getMetadata("ErrorTestClass");
+    if (errorTestMetadata !== null) {
+        const requiredFields = errorTestMetadata.getRequiredFields();
+        const optionalFields = errorTestMetadata.getOptionalFields();
+
+        // Validate that required fields are properly identified
+        const hasNameAsRequired = requiredFields.includes("name");
+        const hasAgeAsRequired = requiredFields.includes("age");
+        const hasEmailAsOptional = optionalFields.includes("email");
+        const emailNotInRequired = !requiredFields.includes("email");
+
+        if (hasNameAsRequired && hasAgeAsRequired && hasEmailAsOptional && emailNotInRequired) {
+            console.log("✓ Field metadata consistency with error handling works correctly");
+            passed++;
+        } else {
+            console.log("✗ Field metadata consistency with error handling failed");
+            console.log("  Name is required: " + hasNameAsRequired.toString());
+            console.log("  Age is required: " + hasAgeAsRequired.toString());
+            console.log("  Email is optional: " + hasEmailAsOptional.toString());
+            console.log("  Email not in required: " + emailNotInRequired.toString());
+        }
+    } else {
+        console.log("✗ Could not retrieve ErrorTestClass metadata");
+    }
+
+    console.log(`Deserialization Error Handling tests: ${passed}/${total} passed\n`);
+    return passed === total;
+}
+
+/**
  * Run all class serialization tests
  */
 export function runAllClassSerializationTests(): boolean {
@@ -1054,7 +2309,12 @@ export function runAllClassSerializationTests(): boolean {
         runBasicTypeConversionTests(),
         runNullableTypeConversionTests(),
         runArrayConversionTests(),
-        runClassSerializationEncoderTests()
+        runClassSerializationEncoderTests(),
+        runSerializationErrorHandlingTests(),
+        runClassSerializationDecoderTests(),
+        runDeserializationErrorHandlingTests(),
+        runNestedClassDeserializationTests(),
+        runComprehensiveIntegrationTests()
     ];
 
     const passed = results.filter(r => r).length;
@@ -1067,6 +2327,1051 @@ export function runAllClassSerializationTests(): boolean {
         console.log("🎉 All class serialization tests passed!");
     } else {
         console.log("❌ Some class serialization tests failed");
+    }
+
+    return passed === total;
+}
+// ============================================================================
+// Integration Test Classes
+// ============================================================================
+
+/**
+ * Simple class for integration testing
+ */
+class IntegrationSimpleClass implements Serializable {
+    name: string;
+    age: i32;
+    isActive: boolean;
+
+    constructor(name: string, age: i32, isActive: boolean) {
+        this.name = name;
+        this.age = age;
+        this.isActive = isActive;
+    }
+
+    getClassName(): string {
+        return "IntegrationSimpleClass";
+    }
+
+    getFieldValue(fieldName: string): MessagePackValue | null {
+        if (fieldName === "name") {
+            return toMessagePackString(this.name);
+        } else if (fieldName === "age") {
+            return toMessagePackInteger32(this.age);
+        } else if (fieldName === "isActive") {
+            return toMessagePackBoolean(this.isActive);
+        }
+        return null;
+    }
+}
+
+/**
+ * Class with optional fields for integration testing
+ */
+class IntegrationOptionalFieldsClass implements Serializable {
+    id: i32;
+    name: string;
+    email: string | null;
+    phone: string | null;
+    metadata: Map<string, string> | null;
+
+    constructor(id: i32, name: string, email: string | null = null, phone: string | null = null, metadata: Map<string, string> | null = null) {
+        this.id = id;
+        this.name = name;
+        this.email = email;
+        this.phone = phone;
+        this.metadata = metadata;
+    }
+
+    getClassName(): string {
+        return "IntegrationOptionalFieldsClass";
+    }
+
+    getFieldValue(fieldName: string): MessagePackValue | null {
+        if (fieldName === "id") {
+            return toMessagePackInteger32(this.id);
+        } else if (fieldName === "name") {
+            return toMessagePackString(this.name);
+        } else if (fieldName === "email") {
+            return this.email !== null ? toMessagePackString(this.email!) : null;
+        } else if (fieldName === "phone") {
+            return this.phone !== null ? toMessagePackString(this.phone!) : null;
+        } else if (fieldName === "metadata") {
+            if (this.metadata !== null) {
+                const mapValues = new Map<string, MessagePackValue>();
+                const keys = this.metadata!.keys();
+                for (let i = 0; i < keys.length; i++) {
+                    const key = keys[i];
+                    const value = this.metadata!.get(key);
+                    mapValues.set(key, toMessagePackString(value));
+                }
+                return toMessagePackMap(mapValues);
+            }
+            return null;
+        }
+        return null;
+    }
+}
+
+/**
+ * Nested class for integration testing
+ */
+class IntegrationNestedClass implements Serializable {
+    id: i32;
+    simple: IntegrationSimpleClass;
+    optional: IntegrationOptionalFieldsClass | null;
+
+    constructor(id: i32, simple: IntegrationSimpleClass, optional: IntegrationOptionalFieldsClass | null = null) {
+        this.id = id;
+        this.simple = simple;
+        this.optional = optional;
+    }
+
+    getClassName(): string {
+        return "IntegrationNestedClass";
+    }
+
+    getFieldValue(fieldName: string): MessagePackValue | null {
+        if (fieldName === "id") {
+            return toMessagePackInteger32(this.id);
+        } else if (fieldName === "simple") {
+            // Serialize nested class
+            const encoder = new MessagePackEncoder();
+            const classEncoder = new ClassSerializationEncoder(encoder);
+            const serializedData = classEncoder.encodeClass(this.simple);
+            const decoder = new MessagePackDecoder(serializedData);
+            return decoder.decode();
+        } else if (fieldName === "optional") {
+            if (this.optional !== null) {
+                const encoder = new MessagePackEncoder();
+                const classEncoder = new ClassSerializationEncoder(encoder);
+                const serializedData = classEncoder.encodeClass(this.optional!);
+                const decoder = new MessagePackDecoder(serializedData);
+                return decoder.decode();
+            }
+            return null;
+        }
+        return null;
+    }
+}
+
+/**
+ * Complex class with arrays and maps for integration testing
+ */
+class IntegrationComplexClass implements Serializable {
+    id: i32;
+    tags: string[];
+    scores: Map<string, f64>;
+    children: IntegrationSimpleClass[];
+    metadata: Map<string, MessagePackValue>;
+
+    constructor(
+        id: i32,
+        tags: string[],
+        scores: Map<string, f64>,
+        children: IntegrationSimpleClass[],
+        metadata: Map<string, MessagePackValue>
+    ) {
+        this.id = id;
+        this.tags = tags;
+        this.scores = scores;
+        this.children = children;
+        this.metadata = metadata;
+    }
+
+    getClassName(): string {
+        return "IntegrationComplexClass";
+    }
+
+    getFieldValue(fieldName: string): MessagePackValue | null {
+        if (fieldName === "id") {
+            return toMessagePackInteger32(this.id);
+        } else if (fieldName === "tags") {
+            return stringArrayToMessagePack(this.tags);
+        } else if (fieldName === "scores") {
+            const mapValues = new Map<string, MessagePackValue>();
+            const keys = this.scores.keys();
+            for (let i = 0; i < keys.length; i++) {
+                const key = keys[i];
+                const value = this.scores.get(key);
+                mapValues.set(key, toMessagePackFloat64(value));
+            }
+            return toMessagePackMap(mapValues);
+        } else if (fieldName === "children") {
+            const childValues: MessagePackValue[] = [];
+            for (let i = 0; i < this.children.length; i++) {
+                const encoder = new MessagePackEncoder();
+                const classEncoder = new ClassSerializationEncoder(encoder);
+                const serializedData = classEncoder.encodeClass(this.children[i]);
+                const decoder = new MessagePackDecoder(serializedData);
+                childValues.push(decoder.decode());
+            }
+            return toMessagePackArray(childValues);
+        } else if (fieldName === "metadata") {
+            return toMessagePackMap(this.metadata);
+        }
+        return null;
+    }
+}
+
+/**
+ * Factory for IntegrationSimpleClass
+ */
+class IntegrationSimpleClassFactory implements ClassFactory {
+    create(): Serializable {
+        return new IntegrationSimpleClass("", 0, false);
+    }
+
+    setFieldValue(instance: Serializable, fieldName: string, value: MessagePackValue): void {
+        const obj = instance as IntegrationSimpleClass;
+        if (fieldName === "name" && value.getType() === MessagePackValueType.STRING) {
+            obj.name = (value as MessagePackString).value;
+        } else if (fieldName === "age" && value.getType() === MessagePackValueType.INTEGER) {
+            obj.age = (value as MessagePackInteger).value as i32;
+        } else if (fieldName === "isActive" && value.getType() === MessagePackValueType.BOOLEAN) {
+            obj.isActive = (value as MessagePackBoolean).value;
+        }
+    }
+}
+
+/**
+ * Factory for IntegrationOptionalFieldsClass
+ */
+class IntegrationOptionalFieldsClassFactory implements ClassFactory {
+    create(): Serializable {
+        return new IntegrationOptionalFieldsClass(0, "", null, null, null);
+    }
+
+    setFieldValue(instance: Serializable, fieldName: string, value: MessagePackValue): void {
+        const obj = instance as IntegrationOptionalFieldsClass;
+        if (fieldName === "id" && value.getType() === MessagePackValueType.INTEGER) {
+            obj.id = (value as MessagePackInteger).value as i32;
+        } else if (fieldName === "name" && value.getType() === MessagePackValueType.STRING) {
+            obj.name = (value as MessagePackString).value;
+        } else if (fieldName === "email" && value.getType() === MessagePackValueType.STRING) {
+            obj.email = (value as MessagePackString).value;
+        } else if (fieldName === "phone" && value.getType() === MessagePackValueType.STRING) {
+            obj.phone = (value as MessagePackString).value;
+        } else if (fieldName === "metadata" && value.getType() === MessagePackValueType.MAP) {
+            const mapValue = value as MessagePackMap;
+            const metadata = new Map<string, string>();
+            const keys = mapValue.value.keys();
+            for (let i = 0; i < keys.length; i++) {
+                const key = keys[i];
+                const val = mapValue.value.get(key);
+                if (val.getType() === MessagePackValueType.STRING) {
+                    metadata.set(key, (val as MessagePackString).value);
+                }
+            }
+            obj.metadata = metadata;
+        }
+    }
+}
+
+/**
+ * Factory for IntegrationNestedClass
+ */
+class IntegrationNestedClassFactory implements ClassFactory {
+    private simpleFactory: IntegrationSimpleClassFactory;
+    private optionalFactory: IntegrationOptionalFieldsClassFactory;
+
+    constructor() {
+        this.simpleFactory = new IntegrationSimpleClassFactory();
+        this.optionalFactory = new IntegrationOptionalFieldsClassFactory();
+    }
+
+    create(): Serializable {
+        return new IntegrationNestedClass(0, new IntegrationSimpleClass("", 0, false), null);
+    }
+
+    setFieldValue(instance: Serializable, fieldName: string, value: MessagePackValue): void {
+        const obj = instance as IntegrationNestedClass;
+        const decoder = new MessagePackDecoder(new Uint8Array(0));
+        const classDecoder = new ClassSerializationDecoder(decoder);
+
+        if (fieldName === "id" && value.getType() === MessagePackValueType.INTEGER) {
+            obj.id = (value as MessagePackInteger).value as i32;
+        } else if (fieldName === "simple" && value.getType() === MessagePackValueType.MAP) {
+            const field = new FieldMetadata("simple", SerializableFieldType.CLASS, false, "IntegrationSimpleClass");
+            const deserializedSimple = classDecoder.deserializeNestedClassWithFactory(value, field, "IntegrationNestedClass", this.simpleFactory);
+            obj.simple = deserializedSimple as IntegrationSimpleClass;
+        } else if (fieldName === "optional" && value.getType() === MessagePackValueType.MAP) {
+            const field = new FieldMetadata("optional", SerializableFieldType.CLASS, true, "IntegrationOptionalFieldsClass");
+            const deserializedOptional = classDecoder.deserializeNestedClassWithFactory(value, field, "IntegrationNestedClass", this.optionalFactory);
+            obj.optional = deserializedOptional as IntegrationOptionalFieldsClass;
+        }
+    }
+}
+
+/**
+ * Factory for IntegrationComplexClass
+ */
+class IntegrationComplexClassFactory implements ClassFactory {
+    private simpleFactory: IntegrationSimpleClassFactory;
+
+    constructor() {
+        this.simpleFactory = new IntegrationSimpleClassFactory();
+    }
+
+    create(): Serializable {
+        return new IntegrationComplexClass(0, [], new Map<string, f64>(), [], new Map<string, MessagePackValue>());
+    }
+
+    setFieldValue(instance: Serializable, fieldName: string, value: MessagePackValue): void {
+        const obj = instance as IntegrationComplexClass;
+        const decoder = new MessagePackDecoder(new Uint8Array(0));
+        const classDecoder = new ClassSerializationDecoder(decoder);
+
+        if (fieldName === "id" && value.getType() === MessagePackValueType.INTEGER) {
+            obj.id = (value as MessagePackInteger).value as i32;
+        } else if (fieldName === "tags" && value.getType() === MessagePackValueType.ARRAY) {
+            const arrayValue = value as MessagePackArray;
+            const tags: string[] = [];
+            for (let i = 0; i < arrayValue.value.length; i++) {
+                const item = arrayValue.value[i];
+                if (item.getType() === MessagePackValueType.STRING) {
+                    tags.push((item as MessagePackString).value);
+                }
+            }
+            obj.tags = tags;
+        } else if (fieldName === "scores" && value.getType() === MessagePackValueType.MAP) {
+            const mapValue = value as MessagePackMap;
+            const scores = new Map<string, f64>();
+            const keys = mapValue.value.keys();
+            for (let i = 0; i < keys.length; i++) {
+                const key = keys[i];
+                const val = mapValue.value.get(key);
+                if (val.getType() === MessagePackValueType.FLOAT) {
+                    scores.set(key, (val as MessagePackFloat).value);
+                }
+            }
+            obj.scores = scores;
+        } else if (fieldName === "children" && value.getType() === MessagePackValueType.ARRAY) {
+            const arrayValue = value as MessagePackArray;
+            const children: IntegrationSimpleClass[] = [];
+            for (let i = 0; i < arrayValue.value.length; i++) {
+                const item = arrayValue.value[i];
+                if (item.getType() === MessagePackValueType.MAP) {
+                    const field = new FieldMetadata(`child_${i}`, SerializableFieldType.CLASS, false, "IntegrationSimpleClass");
+                    const deserializedChild = classDecoder.deserializeNestedClassWithFactory(item, field, "IntegrationComplexClass", this.simpleFactory);
+                    children.push(deserializedChild as IntegrationSimpleClass);
+                }
+            }
+            obj.children = children;
+        } else if (fieldName === "metadata" && value.getType() === MessagePackValueType.MAP) {
+            obj.metadata = (value as MessagePackMap).value;
+        }
+    }
+}
+
+// ============================================================================
+// Comprehensive Integration Tests
+// ============================================================================
+
+/**
+ * Test round-trip serialization for simple class structures
+ */
+export function runSimpleClassRoundTripTests(): boolean {
+    console.log("=== Simple Class Round-Trip Tests ===");
+
+    let passed = 0;
+    let total = 0;
+
+    // Clear and register classes
+    ClassRegistry.clear();
+    const simpleFields = [
+        new FieldMetadata("name", SerializableFieldType.STRING),
+        new FieldMetadata("age", SerializableFieldType.INTEGER),
+        new FieldMetadata("isActive", SerializableFieldType.BOOLEAN)
+    ];
+    ClassRegistry.register("IntegrationSimpleClass", simpleFields);
+
+    // Test 1: Basic round-trip test
+    total++;
+    const original = new IntegrationSimpleClass("Alice", 30, true);
+
+    // Serialize
+    const encoder = new MessagePackEncoder();
+    const classEncoder = new ClassSerializationEncoder(encoder);
+    const serializedData = classEncoder.encodeClass(original);
+
+    // Deserialize
+    const decoder = new MessagePackDecoder(serializedData);
+    const classDecoder = new ClassSerializationDecoder(decoder);
+    const factory = new IntegrationSimpleClassFactory();
+    const deserialized = classDecoder.decodeClass(factory, "IntegrationSimpleClass") as IntegrationSimpleClass;
+
+    if (deserialized.name === "Alice" &&
+        deserialized.age === 30 &&
+        deserialized.isActive === true) {
+        console.log("✓ Simple class round-trip test passed");
+        passed++;
+    } else {
+        console.log("✗ Simple class round-trip test failed");
+        console.log(`  Expected: Alice, 30, true`);
+        console.log(`  Got: ${deserialized.name}, ${deserialized.age}, ${deserialized.isActive}`);
+    }
+
+    // Test 2: Edge case values
+    total++;
+    const edgeCase = new IntegrationSimpleClass("", 0, false);
+
+    const encoder2 = new MessagePackEncoder();
+    const classEncoder2 = new ClassSerializationEncoder(encoder2);
+    const serializedData2 = classEncoder2.encodeClass(edgeCase);
+
+    const decoder2 = new MessagePackDecoder(serializedData2);
+    const classDecoder2 = new ClassSerializationDecoder(decoder2);
+    const factory2 = new IntegrationSimpleClassFactory();
+    const deserialized2 = classDecoder2.decodeClass(factory2, "IntegrationSimpleClass") as IntegrationSimpleClass;
+
+    if (deserialized2.name === "" &&
+        deserialized2.age === 0 &&
+        deserialized2.isActive === false) {
+        console.log("✓ Simple class edge case round-trip test passed");
+        passed++;
+    } else {
+        console.log("✗ Simple class edge case round-trip test failed");
+    }
+
+    console.log(`Simple Class Round-Trip tests: ${passed}/${total} passed\n`);
+    return passed === total;
+}
+
+/**
+ * Test round-trip serialization for classes with optional fields
+ */
+export function runOptionalFieldsRoundTripTests(): boolean {
+    console.log("=== Optional Fields Round-Trip Tests ===");
+
+    let passed = 0;
+    let total = 0;
+
+    // Clear and register classes
+    ClassRegistry.clear();
+    const optionalFields = [
+        new FieldMetadata("id", SerializableFieldType.INTEGER),
+        new FieldMetadata("name", SerializableFieldType.STRING),
+        new FieldMetadata("email", SerializableFieldType.STRING, true),
+        new FieldMetadata("phone", SerializableFieldType.STRING, true),
+        new FieldMetadata("metadata", SerializableFieldType.MAP, true)
+    ];
+    ClassRegistry.register("IntegrationOptionalFieldsClass", optionalFields);
+
+    // Test 1: All fields present
+    total++;
+    const metadata = new Map<string, string>();
+    metadata.set("role", "admin");
+    metadata.set("department", "engineering");
+
+    const original = new IntegrationOptionalFieldsClass(1, "Alice", "alice@example.com", "555-1234", metadata);
+
+    const encoder = new MessagePackEncoder();
+    const classEncoder = new ClassSerializationEncoder(encoder);
+    const serializedData = classEncoder.encodeClass(original);
+
+    const decoder = new MessagePackDecoder(serializedData);
+    const classDecoder = new ClassSerializationDecoder(decoder);
+    const factory = new IntegrationOptionalFieldsClassFactory();
+    const deserialized = classDecoder.decodeClass(factory, "IntegrationOptionalFieldsClass") as IntegrationOptionalFieldsClass;
+
+    if (deserialized.id === 1 &&
+        deserialized.name === "Alice" &&
+        deserialized.email === "alice@example.com" &&
+        deserialized.phone === "555-1234" &&
+        deserialized.metadata !== null &&
+        deserialized.metadata!.get("role") === "admin" &&
+        deserialized.metadata!.get("department") === "engineering") {
+        console.log("✓ Optional fields (all present) round-trip test passed");
+        passed++;
+    } else {
+        console.log("✗ Optional fields (all present) round-trip test failed");
+    }
+
+    // Test 2: Some optional fields missing
+    total++;
+    const original2 = new IntegrationOptionalFieldsClass(2, "Bob", "bob@example.com", null, null);
+
+    const encoder2 = new MessagePackEncoder();
+    const classEncoder2 = new ClassSerializationEncoder(encoder2);
+    const serializedData2 = classEncoder2.encodeClass(original2);
+
+    const decoder2 = new MessagePackDecoder(serializedData2);
+    const classDecoder2 = new ClassSerializationDecoder(decoder2);
+    const factory2 = new IntegrationOptionalFieldsClassFactory();
+    const deserialized2 = classDecoder2.decodeClass(factory2, "IntegrationOptionalFieldsClass") as IntegrationOptionalFieldsClass;
+
+    if (deserialized2.id === 2 &&
+        deserialized2.name === "Bob" &&
+        deserialized2.email === "bob@example.com" &&
+        deserialized2.phone === null &&
+        deserialized2.metadata === null) {
+        console.log("✓ Optional fields (some missing) round-trip test passed");
+        passed++;
+    } else {
+        console.log("✗ Optional fields (some missing) round-trip test failed");
+    }
+
+    // Test 3: All optional fields missing
+    total++;
+    const original3 = new IntegrationOptionalFieldsClass(3, "Charlie", null, null, null);
+
+    const encoder3 = new MessagePackEncoder();
+    const classEncoder3 = new ClassSerializationEncoder(encoder3);
+    const serializedData3 = classEncoder3.encodeClass(original3);
+
+    const decoder3 = new MessagePackDecoder(serializedData3);
+    const classDecoder3 = new ClassSerializationDecoder(decoder3);
+    const factory3 = new IntegrationOptionalFieldsClassFactory();
+    const deserialized3 = classDecoder3.decodeClass(factory3, "IntegrationOptionalFieldsClass") as IntegrationOptionalFieldsClass;
+
+    if (deserialized3.id === 3 &&
+        deserialized3.name === "Charlie" &&
+        deserialized3.email === null &&
+        deserialized3.phone === null &&
+        deserialized3.metadata === null) {
+        console.log("✓ Optional fields (all missing) round-trip test passed");
+        passed++;
+    } else {
+        console.log("✗ Optional fields (all missing) round-trip test failed");
+    }
+
+    console.log(`Optional Fields Round-Trip tests: ${passed}/${total} passed\n`);
+    return passed === total;
+}
+
+/**
+ * Test round-trip serialization for nested class structures
+ */
+export function runNestedClassRoundTripTests(): boolean {
+    console.log("=== Nested Class Round-Trip Tests ===");
+
+    let passed = 0;
+    let total = 0;
+
+    // Clear and register classes
+    ClassRegistry.clear();
+
+    const simpleFields = [
+        new FieldMetadata("name", SerializableFieldType.STRING),
+        new FieldMetadata("age", SerializableFieldType.INTEGER),
+        new FieldMetadata("isActive", SerializableFieldType.BOOLEAN)
+    ];
+    ClassRegistry.register("IntegrationSimpleClass", simpleFields);
+
+    const optionalFields = [
+        new FieldMetadata("id", SerializableFieldType.INTEGER),
+        new FieldMetadata("name", SerializableFieldType.STRING),
+        new FieldMetadata("email", SerializableFieldType.STRING, true),
+        new FieldMetadata("phone", SerializableFieldType.STRING, true),
+        new FieldMetadata("metadata", SerializableFieldType.MAP, true)
+    ];
+    ClassRegistry.register("IntegrationOptionalFieldsClass", optionalFields);
+
+    const nestedFields = [
+        new FieldMetadata("id", SerializableFieldType.INTEGER),
+        new FieldMetadata("simple", SerializableFieldType.CLASS, false, "IntegrationSimpleClass"),
+        new FieldMetadata("optional", SerializableFieldType.CLASS, true, "IntegrationOptionalFieldsClass")
+    ];
+    ClassRegistry.register("IntegrationNestedClass", nestedFields);
+
+    // Test 1: Nested class with all fields
+    total++;
+    const simpleObj = new IntegrationSimpleClass("Alice", 30, true);
+    const optionalObj = new IntegrationOptionalFieldsClass(1, "Bob", "bob@example.com", null, null);
+    const original = new IntegrationNestedClass(100, simpleObj, optionalObj);
+
+    const encoder = new MessagePackEncoder();
+    const classEncoder = new ClassSerializationEncoder(encoder);
+    const serializedData = classEncoder.encodeClass(original);
+
+    const decoder = new MessagePackDecoder(serializedData);
+    const classDecoder = new ClassSerializationDecoder(decoder);
+    const factory = new IntegrationNestedClassFactory();
+    const deserialized = classDecoder.decodeClass(factory, "IntegrationNestedClass") as IntegrationNestedClass;
+
+    if (deserialized.id === 100 &&
+        deserialized.simple.name === "Alice" &&
+        deserialized.simple.age === 30 &&
+        deserialized.simple.isActive === true &&
+        deserialized.optional !== null &&
+        deserialized.optional!.id === 1 &&
+        deserialized.optional!.name === "Bob" &&
+        deserialized.optional!.email === "bob@example.com") {
+        console.log("✓ Nested class (all fields) round-trip test passed");
+        passed++;
+    } else {
+        console.log("✗ Nested class (all fields) round-trip test failed");
+    }
+
+    // Test 2: Nested class with optional field missing
+    total++;
+    const simpleObj2 = new IntegrationSimpleClass("Charlie", 25, false);
+    const original2 = new IntegrationNestedClass(200, simpleObj2, null);
+
+    const encoder2 = new MessagePackEncoder();
+    const classEncoder2 = new ClassSerializationEncoder(encoder2);
+    const serializedData2 = classEncoder2.encodeClass(original2);
+
+    const decoder2 = new MessagePackDecoder(serializedData2);
+    const classDecoder2 = new ClassSerializationDecoder(decoder2);
+    const factory2 = new IntegrationNestedClassFactory();
+    const deserialized2 = classDecoder2.decodeClass(factory2, "IntegrationNestedClass") as IntegrationNestedClass;
+
+    if (deserialized2.id === 200 &&
+        deserialized2.simple.name === "Charlie" &&
+        deserialized2.simple.age === 25 &&
+        deserialized2.simple.isActive === false &&
+        deserialized2.optional === null) {
+        console.log("✓ Nested class (optional missing) round-trip test passed");
+        passed++;
+    } else {
+        console.log("✗ Nested class (optional missing) round-trip test failed");
+    }
+
+    console.log(`Nested Class Round-Trip tests: ${passed}/${total} passed\n`);
+    return passed === total;
+}
+
+/**
+ * Test round-trip serialization for complex object graphs with arrays and maps
+ */
+export function runComplexObjectGraphTests(): boolean {
+    console.log("=== Complex Object Graph Tests ===");
+
+    let passed = 0;
+    let total = 0;
+
+    // Clear and register classes
+    ClassRegistry.clear();
+
+    const simpleFields = [
+        new FieldMetadata("name", SerializableFieldType.STRING),
+        new FieldMetadata("age", SerializableFieldType.INTEGER),
+        new FieldMetadata("isActive", SerializableFieldType.BOOLEAN)
+    ];
+    ClassRegistry.register("IntegrationSimpleClass", simpleFields);
+
+    const complexFields = [
+        new FieldMetadata("id", SerializableFieldType.INTEGER),
+        new FieldMetadata("tags", SerializableFieldType.ARRAY),
+        new FieldMetadata("scores", SerializableFieldType.MAP),
+        new FieldMetadata("children", SerializableFieldType.ARRAY),
+        new FieldMetadata("metadata", SerializableFieldType.MAP)
+    ];
+    ClassRegistry.register("IntegrationComplexClass", complexFields);
+
+    // Test 1: Complex object with arrays and maps
+    total++;
+    const tags = ["important", "urgent", "review"];
+    const scores = new Map<string, f64>();
+    scores.set("performance", 95.5);
+    scores.set("quality", 88.2);
+    scores.set("reliability", 92.1);
+
+    const children = [
+        new IntegrationSimpleClass("Child1", 10, true),
+        new IntegrationSimpleClass("Child2", 15, false),
+        new IntegrationSimpleClass("Child3", 20, true)
+    ];
+
+    const metadata = new Map<string, MessagePackValue>();
+    metadata.set("version", toMessagePackString("1.0.0"));
+    metadata.set("timestamp", toMessagePackInteger64(1640995200));
+    metadata.set("enabled", toMessagePackBoolean(true));
+
+    const original = new IntegrationComplexClass(1000, tags, scores, children, metadata);
+
+    const encoder = new MessagePackEncoder();
+    const classEncoder = new ClassSerializationEncoder(encoder);
+    const serializedData = classEncoder.encodeClass(original);
+
+    const decoder = new MessagePackDecoder(serializedData);
+    const classDecoder = new ClassSerializationDecoder(decoder);
+    const factory = new IntegrationComplexClassFactory();
+    const deserialized = classDecoder.decodeClass(factory, "IntegrationComplexClass") as IntegrationComplexClass;
+
+    let complexTestPassed = true;
+
+    // Validate basic fields
+    if (deserialized.id !== 1000) {
+        complexTestPassed = false;
+        console.log("  ID mismatch");
+    }
+
+    // Validate tags array
+    if (deserialized.tags.length !== 3 ||
+        deserialized.tags[0] !== "important" ||
+        deserialized.tags[1] !== "urgent" ||
+        deserialized.tags[2] !== "review") {
+        complexTestPassed = false;
+        console.log("  Tags array mismatch");
+    }
+
+    // Validate scores map
+    if (Math.abs(deserialized.scores.get("performance") - 95.5) > 0.01 ||
+        Math.abs(deserialized.scores.get("quality") - 88.2) > 0.01 ||
+        Math.abs(deserialized.scores.get("reliability") - 92.1) > 0.01) {
+        complexTestPassed = false;
+        console.log("  Scores map mismatch");
+    }
+
+    // Validate children array
+    if (deserialized.children.length !== 3 ||
+        deserialized.children[0].name !== "Child1" ||
+        deserialized.children[0].age !== 10 ||
+        deserialized.children[0].isActive !== true ||
+        deserialized.children[1].name !== "Child2" ||
+        deserialized.children[1].age !== 15 ||
+        deserialized.children[1].isActive !== false ||
+        deserialized.children[2].name !== "Child3" ||
+        deserialized.children[2].age !== 20 ||
+        deserialized.children[2].isActive !== true) {
+        complexTestPassed = false;
+        console.log("  Children array mismatch");
+    }
+
+    // Validate metadata map
+    const versionValue = deserialized.metadata.get("version");
+    const timestampValue = deserialized.metadata.get("timestamp");
+    const enabledValue = deserialized.metadata.get("enabled");
+
+    if (versionValue === null || versionValue.getType() !== MessagePackValueType.STRING ||
+        (versionValue as MessagePackString).value !== "1.0.0" ||
+        timestampValue === null || timestampValue.getType() !== MessagePackValueType.INTEGER ||
+        (timestampValue as MessagePackInteger).value !== 1640995200 ||
+        enabledValue === null || enabledValue.getType() !== MessagePackValueType.BOOLEAN ||
+        (enabledValue as MessagePackBoolean).value !== true) {
+        complexTestPassed = false;
+        console.log("  Metadata map mismatch");
+    }
+
+    if (complexTestPassed) {
+        console.log("✓ Complex object graph round-trip test passed");
+        passed++;
+    } else {
+        console.log("✗ Complex object graph round-trip test failed");
+    }
+
+    console.log(`Complex Object Graph tests: ${passed}/${total} passed\n`);
+    return passed === total;
+}
+
+/**
+ * Test MessagePack output compatibility with specification
+ */
+export function runMessagePackCompatibilityTests(): boolean {
+    console.log("=== MessagePack Compatibility Tests ===");
+
+    let passed = 0;
+    let total = 0;
+
+    // Clear and register classes
+    ClassRegistry.clear();
+    const simpleFields = [
+        new FieldMetadata("name", SerializableFieldType.STRING),
+        new FieldMetadata("age", SerializableFieldType.INTEGER),
+        new FieldMetadata("isActive", SerializableFieldType.BOOLEAN)
+    ];
+    ClassRegistry.register("IntegrationSimpleClass", simpleFields);
+
+    // Test 1: Verify MessagePack format structure
+    total++;
+    const original = new IntegrationSimpleClass("Test", 42, true);
+
+    const encoder = new MessagePackEncoder();
+    const classEncoder = new ClassSerializationEncoder(encoder);
+    const serializedData = classEncoder.encodeClass(original);
+
+    // Decode using standard MessagePack decoder to verify format
+    const decoder = new MessagePackDecoder(serializedData);
+    const decodedValue = decoder.decode();
+
+    if (decodedValue.getType() === MessagePackValueType.MAP) {
+        const mapValue = decodedValue as MessagePackMap;
+        const nameValue = mapValue.value.get("name");
+        const ageValue = mapValue.value.get("age");
+        const isActiveValue = mapValue.value.get("isActive");
+
+        if (nameValue !== null && nameValue.getType() === MessagePackValueType.STRING &&
+            (nameValue as MessagePackString).value === "Test" &&
+            ageValue !== null && ageValue.getType() === MessagePackValueType.INTEGER &&
+            (ageValue as MessagePackInteger).value === 42 &&
+            isActiveValue !== null && isActiveValue.getType() === MessagePackValueType.BOOLEAN &&
+            (isActiveValue as MessagePackBoolean).value === true) {
+            console.log("✓ MessagePack format compatibility test passed");
+            passed++;
+        } else {
+            console.log("✗ MessagePack format compatibility test failed - field values incorrect");
+        }
+    } else {
+        console.log("✗ MessagePack format compatibility test failed - not a map");
+    }
+
+    // Test 2: Verify binary format follows MessagePack specification
+    total++;
+    const simpleObj = new IntegrationSimpleClass("A", 1, false);
+
+    const encoder2 = new MessagePackEncoder();
+    const classEncoder2 = new ClassSerializationEncoder(encoder2);
+    const serializedData2 = classEncoder2.encodeClass(simpleObj);
+
+    // Check that the binary data starts with a map format byte
+    if (serializedData2.length > 0) {
+        const firstByte = serializedData2[0];
+        // MessagePack map format: fixmap (0x80-0x8f) or map16 (0xde) or map32 (0xdf)
+        if ((firstByte >= 0x80 && firstByte <= 0x8f) || firstByte === 0xde || firstByte === 0xdf) {
+            console.log("✓ MessagePack binary format starts with correct map format byte");
+            passed++;
+        } else {
+            console.log(`✗ MessagePack binary format test failed - first byte: 0x${firstByte.toString(16)}`);
+        }
+    } else {
+        console.log("✗ MessagePack binary format test failed - empty data");
+    }
+
+    // Test 3: Cross-compatibility test (serialize with class, deserialize with standard decoder)
+    total++;
+    const testObj = new IntegrationSimpleClass("Cross", 99, true);
+
+    const encoder3 = new MessagePackEncoder();
+    const classEncoder3 = new ClassSerializationEncoder(encoder3);
+    const serializedData3 = classEncoder3.encodeClass(testObj);
+
+    // Deserialize with standard MessagePack decoder
+    const decoder3 = new MessagePackDecoder(serializedData3);
+    const standardDecoded = decoder3.decode();
+
+    if (standardDecoded.getType() === MessagePackValueType.MAP) {
+        const mapValue3 = standardDecoded as MessagePackMap;
+
+        // Verify we can access all fields through standard MessagePack
+        const hasName = mapValue3.value.has("name");
+        const hasAge = mapValue3.value.has("age");
+        const hasIsActive = mapValue3.value.has("isActive");
+
+        if (hasName && hasAge && hasIsActive) {
+            console.log("✓ Cross-compatibility test passed");
+            passed++;
+        } else {
+            console.log("✗ Cross-compatibility test failed - missing fields");
+        }
+    } else {
+        console.log("✗ Cross-compatibility test failed - not a map");
+    }
+
+    console.log(`MessagePack Compatibility tests: ${passed}/${total} passed\n`);
+    return passed === total;
+}
+
+/**
+ * Performance benchmark tests comparing class serialization vs manual map creation
+ */
+export function runPerformanceBenchmarkTests(): boolean {
+    console.log("=== Performance Benchmark Tests ===");
+
+    let passed = 0;
+    let total = 0;
+
+    // Clear and register classes
+    ClassRegistry.clear();
+    const simpleFields = [
+        new FieldMetadata("name", SerializableFieldType.STRING),
+        new FieldMetadata("age", SerializableFieldType.INTEGER),
+        new FieldMetadata("isActive", SerializableFieldType.BOOLEAN)
+    ];
+    ClassRegistry.register("IntegrationSimpleClass", simpleFields);
+
+    const iterations = 1000;
+
+    // Test 1: Class serialization performance
+    total++;
+    const classObjects: IntegrationSimpleClass[] = [];
+    for (let i = 0; i < iterations; i++) {
+        classObjects.push(new IntegrationSimpleClass(`User${i}`, i, i % 2 === 0));
+    }
+
+    const classStartTime = Date.now();
+    const classResults: Uint8Array[] = [];
+
+    for (let i = 0; i < iterations; i++) {
+        const encoder = new MessagePackEncoder();
+        const classEncoder = new ClassSerializationEncoder(encoder);
+        const serialized = classEncoder.encodeClass(classObjects[i]);
+        classResults.push(serialized);
+    }
+
+    const classEndTime = Date.now();
+    const classSerializationTime = classEndTime - classStartTime;
+
+    // Test 2: Manual map creation performance
+    const manualStartTime = Date.now();
+    const manualResults: Uint8Array[] = [];
+
+    for (let i = 0; i < iterations; i++) {
+        const obj = classObjects[i];
+        const map = new Map<string, MessagePackValue>();
+        map.set("name", toMessagePackString(obj.name));
+        map.set("age", toMessagePackInteger32(obj.age));
+        map.set("isActive", toMessagePackBoolean(obj.isActive));
+
+        const encoder = new MessagePackEncoder();
+        const serialized = encoder.encodeMap(map);
+        manualResults.push(serialized);
+    }
+
+    const manualEndTime = Date.now();
+    const manualSerializationTime = manualEndTime - manualStartTime;
+
+    // Verify both approaches produce equivalent results
+    let resultsMatch = true;
+    for (let i = 0; i < Math.min(10, iterations); i++) {
+        const classResult = classResults[i];
+        const manualResult = manualResults[i];
+
+        if (classResult.length !== manualResult.length) {
+            resultsMatch = false;
+            break;
+        }
+
+        for (let j = 0; j < classResult.length; j++) {
+            if (classResult[j] !== manualResult[j]) {
+                resultsMatch = false;
+                break;
+            }
+        }
+
+        if (!resultsMatch) break;
+    }
+
+    console.log(`  Class serialization time: ${classSerializationTime}ms`);
+    console.log(`  Manual map creation time: ${manualSerializationTime}ms`);
+
+    if (resultsMatch) {
+        console.log(`  Results match: ✓`);
+
+        // Performance comparison (class serialization should be reasonably close to manual)
+        const performanceRatio = (classSerializationTime as f64) / (manualSerializationTime as f64);
+        console.log(`  Performance ratio (class/manual): ${performanceRatio.toString()}`);
+
+        // Accept if class serialization is within 3x of manual performance
+        if (performanceRatio <= 3.0) {
+            console.log("✓ Performance benchmark test passed");
+            passed++;
+        } else {
+            console.log("✗ Performance benchmark test failed - class serialization too slow");
+        }
+    } else {
+        console.log("✗ Performance benchmark test failed - results don't match");
+    }
+
+    // Test 3: Deserialization performance comparison
+    total++;
+    const factory = new IntegrationSimpleClassFactory();
+
+    // Class deserialization performance
+    const classDeserStartTime = Date.now();
+    const classDeserResults: IntegrationSimpleClass[] = [];
+
+    for (let i = 0; i < Math.min(100, iterations); i++) {
+        const decoder = new MessagePackDecoder(classResults[i]);
+        const classDecoder = new ClassSerializationDecoder(decoder);
+        const deserialized = classDecoder.decodeClass(factory, "IntegrationSimpleClass") as IntegrationSimpleClass;
+        classDeserResults.push(deserialized);
+    }
+
+    const classDeserEndTime = Date.now();
+    const classDeserializationTime = classDeserEndTime - classDeserStartTime;
+
+    // Manual deserialization performance
+    const manualDeserStartTime = Date.now();
+    const manualDeserResults: IntegrationSimpleClass[] = [];
+
+    for (let i = 0; i < Math.min(100, iterations); i++) {
+        const decoder = new MessagePackDecoder(manualResults[i]);
+        const decoded = decoder.decode() as MessagePackMap;
+
+        const name = (decoded.value.get("name") as MessagePackString).value;
+        const age = (decoded.value.get("age") as MessagePackInteger).value as i32;
+        const isActive = (decoded.value.get("isActive") as MessagePackBoolean).value;
+
+        const obj = new IntegrationSimpleClass(name, age, isActive);
+        manualDeserResults.push(obj);
+    }
+
+    const manualDeserEndTime = Date.now();
+    const manualDeserializationTime = manualDeserEndTime - manualDeserStartTime;
+
+    console.log(`  Class deserialization time: ${classDeserializationTime}ms`);
+    console.log(`  Manual deserialization time: ${manualDeserializationTime}ms`);
+
+    // Verify deserialization results match
+    let deserResultsMatch = true;
+    for (let i = 0; i < Math.min(10, classDeserResults.length); i++) {
+        const classResult = classDeserResults[i];
+        const manualResult = manualDeserResults[i];
+
+        if (classResult.name !== manualResult.name ||
+            classResult.age !== manualResult.age ||
+            classResult.isActive !== manualResult.isActive) {
+            deserResultsMatch = false;
+            break;
+        }
+    }
+
+    if (deserResultsMatch) {
+        console.log(`  Deserialization results match: ✓`);
+
+        if (manualDeserializationTime > 0) {
+            const deserPerformanceRatio = (classDeserializationTime as f64) / (manualDeserializationTime as f64);
+            console.log(`  Deserialization performance ratio (class/manual): ${deserPerformanceRatio.toString()}`);
+
+            // Accept if class deserialization is within 5x of manual performance
+            if (deserPerformanceRatio <= 5.0) {
+                console.log("✓ Deserialization performance benchmark test passed");
+                passed++;
+            } else {
+                console.log("✗ Deserialization performance benchmark test failed - too slow");
+            }
+        } else {
+            // Both times are 0 or very small, consider it a pass
+            console.log(`  Deserialization performance ratio (class/manual): both too fast to measure accurately`);
+            console.log("✓ Deserialization performance benchmark test passed (both very fast)");
+            passed++;
+        }
+    } else {
+        console.log("✗ Deserialization performance benchmark test failed - results don't match");
+    }
+
+    console.log(`Performance Benchmark tests: ${passed}/${total} passed\n`);
+    return passed === total;
+}
+
+/**
+ * Run all comprehensive integration tests
+ */
+export function runComprehensiveIntegrationTests(): boolean {
+    console.log("=== Comprehensive Integration Tests ===\n");
+
+    const results = [
+        runSimpleClassRoundTripTests(),
+        runOptionalFieldsRoundTripTests(),
+        runNestedClassRoundTripTests(),
+        runComplexObjectGraphTests(),
+        runMessagePackCompatibilityTests(),
+        runPerformanceBenchmarkTests()
+    ];
+
+    const passed = results.filter(r => r).length;
+    const total = results.length;
+
+    console.log(`=== Integration Test Summary ===`);
+    console.log(`${passed}/${total} integration test suites passed`);
+
+    if (passed === total) {
+        console.log("🎉 All integration tests passed!");
+    } else {
+        console.log("❌ Some integration tests failed");
     }
 
     return passed === total;

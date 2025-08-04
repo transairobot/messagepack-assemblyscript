@@ -84,6 +84,10 @@ export {
     ClassRegistry,
     Serializable,
     ClassSerializationEncoder,
+    ClassSerializationError,
+    ClassFactory,
+    ClassSerializationDecoder,
+    ClassDeserializationError,
     // Type conversion utilities
     toMessagePackBoolean,
     toMessagePackInteger32,

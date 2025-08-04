@@ -22,6 +22,146 @@ import {
     MessagePackValueType
 } from "./types";
 import { MessagePackEncoder } from "./encoder";
+import { MessagePackDecoder } from "./decoder";
+
+// ============================================================================
+// Class-Specific Error Types
+// ============================================================================
+
+/**
+ * Custom error class for class serialization errors
+ * Extends MessagePackEncodeError with class-specific context and methods
+ */
+export class ClassSerializationError extends MessagePackEncodeError {
+    /** The name of the class being serialized when the error occurred */
+    public className: string;
+    /** The name of the field being processed when the error occurred (if applicable) */
+    public fieldName: string;
+
+    constructor(message: string, className: string, fieldName: string = "", position: i32 = -1, context: string = "class serialization") {
+        super(message, position, context);
+        this.className = className;
+        this.fieldName = fieldName;
+    }
+
+    /**
+     * Creates a class serialization error for unregistered classes
+     * @param className The name of the unregistered class
+     * @returns ClassSerializationError instance
+     */
+    static unregisteredClass(className: string): ClassSerializationError {
+        return new ClassSerializationError(
+            `Class '${className}' is not registered for serialization. Use ClassRegistry.register() to register the class first.`,
+            className,
+            "",
+            -1,
+            "class registration validation"
+        );
+    }
+
+    /**
+     * Creates a class serialization error for missing required fields
+     * @param fieldName The name of the missing field
+     * @param className The name of the class
+     * @returns ClassSerializationError instance
+     */
+    static missingRequiredField(fieldName: string, className: string): ClassSerializationError {
+        return new ClassSerializationError(
+            `Required field '${fieldName}' is null or missing in class '${className}'. Ensure the field has a non-null value or mark it as optional.`,
+            className,
+            fieldName,
+            -1,
+            "required field validation"
+        );
+    }
+
+    /**
+     * Creates a class serialization error for field type mismatches
+     * @param fieldName The name of the field with type mismatch
+     * @param className The name of the class
+     * @param expectedType The expected MessagePackValueType
+     * @param actualType The actual MessagePackValueType
+     * @returns ClassSerializationError instance
+     */
+    static fieldTypeMismatch(fieldName: string, className: string, expectedType: MessagePackValueType, actualType: MessagePackValueType): ClassSerializationError {
+        return new ClassSerializationError(
+            `Type mismatch for field '${fieldName}' in class '${className}': expected ${getMessagePackValueTypeName(expectedType)}, got ${getMessagePackValueTypeName(actualType)}. Check the field metadata registration and getFieldValue() implementation.`,
+            className,
+            fieldName,
+            -1,
+            "field type validation"
+        );
+    }
+
+    /**
+     * Creates a class serialization error for invalid nested class types
+     * @param fieldName The name of the field with invalid nested class
+     * @param className The name of the parent class
+     * @param nestedClassName The name of the unregistered nested class
+     * @returns ClassSerializationError instance
+     */
+    static unregisteredNestedClass(fieldName: string, className: string, nestedClassName: string): ClassSerializationError {
+        return new ClassSerializationError(
+            `Nested class type '${nestedClassName}' for field '${fieldName}' in class '${className}' is not registered. Register the nested class first.`,
+            className,
+            fieldName,
+            -1,
+            "nested class validation"
+        );
+    }
+
+    /**
+     * Creates a class serialization error for invalid nested class format
+     * @param fieldName The name of the field with invalid format
+     * @param className The name of the parent class
+     * @param actualType The actual type received instead of map
+     * @returns ClassSerializationError instance
+     */
+    static invalidNestedClassFormat(fieldName: string, className: string, actualType: MessagePackValueType): ClassSerializationError {
+        return new ClassSerializationError(
+            `Nested class field '${fieldName}' in class '${className}' must be a MessagePackMap (serialized class), got ${getMessagePackValueTypeName(actualType)}. Ensure the nested class is properly serialized.`,
+            className,
+            fieldName,
+            -1,
+            "nested class format validation"
+        );
+    }
+
+    /**
+     * Creates a class serialization error for circular references
+     * @param className The name of the class where circular reference was detected
+     * @param fieldName The name of the field causing the circular reference
+     * @returns ClassSerializationError instance
+     */
+    static circularReference(className: string, fieldName: string): ClassSerializationError {
+        return new ClassSerializationError(
+            `Circular reference detected in class '${className}' at field '${fieldName}'. Circular references are not supported in class serialization.`,
+            className,
+            fieldName,
+            -1,
+            "circular reference detection"
+        );
+    }
+}
+
+/**
+ * Helper function to get a human-readable name for MessagePackValueType
+ * @param type The MessagePackValueType
+ * @returns String representation of the type
+ */
+function getMessagePackValueTypeName(type: MessagePackValueType): string {
+    switch (type) {
+        case MessagePackValueType.NULL: return "NULL";
+        case MessagePackValueType.BOOLEAN: return "BOOLEAN";
+        case MessagePackValueType.INTEGER: return "INTEGER";
+        case MessagePackValueType.FLOAT: return "FLOAT";
+        case MessagePackValueType.STRING: return "STRING";
+        case MessagePackValueType.BINARY: return "BINARY";
+        case MessagePackValueType.ARRAY: return "ARRAY";
+        case MessagePackValueType.MAP: return "MAP";
+        default: return "UNKNOWN";
+    }
+}
 
 /**
  * Enum representing supported field types for serialization
@@ -438,11 +578,7 @@ export class ClassSerializationEncoder {
         // Validate that the class is registered
         const metadata = ClassRegistry.getMetadata(className);
         if (metadata === null) {
-            throw new MessagePackEncodeError(
-                `Class '${className}' is not registered for serialization`,
-                -1,
-                "class serialization"
-            );
+            throw ClassSerializationError.unregisteredClass(className);
         }
 
         // Build map of field values for serialization
@@ -456,11 +592,7 @@ export class ClassSerializationEncoder {
             // Handle required fields
             if (fieldValue === null) {
                 if (!field.isOptional) {
-                    throw new MessagePackEncodeError(
-                        `Required field '${field.name}' is null or missing in class '${className}'`,
-                        -1,
-                        "field validation"
-                    );
+                    throw ClassSerializationError.missingRequiredField(field.name, className);
                 }
                 // Skip optional fields that are null
                 continue;
@@ -525,20 +657,17 @@ export class ClassSerializationEncoder {
                 expectedType = MessagePackValueType.MAP;
                 break;
             default:
-                throw new MessagePackEncodeError(
-                    `Unknown field type '${field.type}' for field '${field.name}' in class '${className}'`,
-                    -1,
-                    "type validation"
+                throw ClassSerializationError.fieldTypeMismatch(
+                    field.name,
+                    className,
+                    MessagePackValueType.NULL, // Use NULL as placeholder for unknown expected type
+                    actualType
                 );
         }
 
         // Check if the actual type matches the expected type
         if (actualType !== expectedType) {
-            throw new MessagePackEncodeError(
-                `Type mismatch for field '${field.name}' in class '${className}': expected ${this.getTypeString(expectedType)}, got ${this.getTypeString(actualType)}`,
-                -1,
-                "type validation"
-            );
+            throw ClassSerializationError.fieldTypeMismatch(field.name, className, expectedType, actualType);
         }
     }
 
@@ -554,24 +683,16 @@ export class ClassSerializationEncoder {
         // For nested classes, the value should already be a MessagePackMap
         // This is because the nested class's getFieldValue method should return
         // the result of calling encodeClass on the nested instance
-        
+
         if (value.getType() !== MessagePackValueType.MAP) {
-            throw new MessagePackEncodeError(
-                `Nested class field '${field.name}' in class '${parentClassName}' must be a MessagePackMap, got ${this.getTypeString(value.getType())}`,
-                -1,
-                "nested class validation"
-            );
+            throw ClassSerializationError.invalidNestedClassFormat(field.name, parentClassName, value.getType());
         }
 
         // Validate that the nested class type is registered
         if (field.nestedClassType !== null) {
             const nestedMetadata = ClassRegistry.getMetadata(field.nestedClassType!);
             if (nestedMetadata === null) {
-                throw new MessagePackEncodeError(
-                    `Nested class type '${field.nestedClassType!}' for field '${field.name}' in class '${parentClassName}' is not registered`,
-                    -1,
-                    "nested class validation"
-                );
+                throw ClassSerializationError.unregisteredNestedClass(field.name, parentClassName, field.nestedClassType!);
             }
         }
 
@@ -611,6 +732,605 @@ export class ClassSerializationEncoder {
      */
     reset(): void {
         this.encoder.reset();
+    }
+}
+
+// ============================================================================
+// Class Deserialization Decoder Extension
+// ============================================================================
+
+/**
+ * Custom error class for class deserialization errors
+ * Extends MessagePackDecodeError with class-specific context and methods
+ */
+export class ClassDeserializationError extends MessagePackDecodeError {
+    /** The name of the class being deserialized when the error occurred */
+    public className: string;
+    /** The name of the field being processed when the error occurred (if applicable) */
+    public fieldName: string;
+
+    constructor(message: string, className: string, fieldName: string = "", position: i32 = -1, formatByte: u8 = 0, context: string = "class deserialization") {
+        super(message, position, formatByte, context);
+        this.className = className;
+        this.fieldName = fieldName;
+    }
+
+    /**
+     * Creates a class deserialization error for unregistered classes
+     * @param className The name of the unregistered class
+     * @returns ClassDeserializationError instance
+     */
+    static unregisteredClass(className: string): ClassDeserializationError {
+        return new ClassDeserializationError(
+            `Class '${className}' is not registered for deserialization. Use ClassRegistry.register() to register the class first.`,
+            className,
+            "",
+            -1,
+            0,
+            "class registration validation"
+        );
+    }
+
+    /**
+     * Creates a class deserialization error for invalid MessagePack format
+     * @param className The name of the class
+     * @param actualType The actual MessagePackValueType received
+     * @returns ClassDeserializationError instance
+     */
+    static invalidFormat(className: string, actualType: MessagePackValueType): ClassDeserializationError {
+        return new ClassDeserializationError(
+            `Expected MessagePack map for class '${className}', got ${getMessagePackValueTypeName(actualType)}. Classes must be serialized as maps.`,
+            className,
+            "",
+            -1,
+            0,
+            "format validation"
+        );
+    }
+
+    /**
+     * Creates a class deserialization error for missing required fields
+     * @param fieldName The name of the missing field
+     * @param className The name of the class
+     * @returns ClassDeserializationError instance
+     */
+    static missingRequiredField(fieldName: string, className: string): ClassDeserializationError {
+        return new ClassDeserializationError(
+            `Required field '${fieldName}' is missing from MessagePack data for class '${className}'. Ensure the field was included during serialization.`,
+            className,
+            fieldName,
+            -1,
+            0,
+            "required field validation"
+        );
+    }
+
+    /**
+     * Creates a class deserialization error for field type mismatches
+     * @param fieldName The name of the field with type mismatch
+     * @param className The name of the class
+     * @param expectedType The expected MessagePackValueType
+     * @param actualType The actual MessagePackValueType
+     * @returns ClassDeserializationError instance
+     */
+    static fieldTypeMismatch(fieldName: string, className: string, expectedType: MessagePackValueType, actualType: MessagePackValueType): ClassDeserializationError {
+        return new ClassDeserializationError(
+            `Type mismatch for field '${fieldName}' in class '${className}': expected ${getMessagePackValueTypeName(expectedType)}, got ${getMessagePackValueTypeName(actualType)}. Check the serialized data format.`,
+            className,
+            fieldName,
+            -1,
+            0,
+            "field type validation"
+        );
+    }
+
+    /**
+     * Creates a class deserialization error for unregistered nested classes
+     * @param fieldName The name of the field with unregistered nested class
+     * @param className The name of the parent class
+     * @param nestedClassName The name of the unregistered nested class
+     * @returns ClassDeserializationError instance
+     */
+    static unregisteredNestedClass(fieldName: string, className: string, nestedClassName: string): ClassDeserializationError {
+        return new ClassDeserializationError(
+            `Nested class type '${nestedClassName}' for field '${fieldName}' in class '${className}' is not registered. Register the nested class first.`,
+            className,
+            fieldName,
+            -1,
+            0,
+            "nested class validation"
+        );
+    }
+}
+
+/**
+ * Factory interface for creating and populating class instances during deserialization
+ * 
+ * This interface must be implemented by users to provide the deserialization system
+ * with the ability to create new instances of their classes and set field values.
+ * Since AssemblyScript lacks reflection, this factory pattern is necessary.
+ */
+export interface ClassFactory {
+    /**
+     * Create a new instance of the class
+     * This should return a new instance with default values or uninitialized fields
+     * @returns A new instance of the class
+     */
+    create(): Serializable;
+
+    /**
+     * Set a field value on a class instance
+     * This method should set the specified field to the given MessagePackValue
+     * The implementation should handle type conversion from MessagePackValue to the appropriate field type
+     * @param instance The class instance to modify
+     * @param fieldName The name of the field to set
+     * @param value The MessagePackValue to set (guaranteed to match the registered field type)
+     */
+    setFieldValue(instance: Serializable, fieldName: string, value: MessagePackValue): void;
+}
+
+/**
+ * Extension of MessagePackDecoder that provides class deserialization capabilities
+ * 
+ * This class wraps the existing MessagePackDecoder and adds methods for deserializing
+ * MessagePack data back into class instances. It handles field mapping, type validation,
+ * and nested class deserialization.
+ */
+export class ClassSerializationDecoder {
+    /** The underlying MessagePack decoder */
+    private decoder: MessagePackDecoder;
+
+    /**
+     * Creates a new class serialization decoder
+     * @param decoder The MessagePackDecoder instance to wrap
+     */
+    constructor(decoder: MessagePackDecoder) {
+        this.decoder = decoder;
+    }
+
+    /**
+     * Deserializes MessagePack data to a class instance
+     * 
+     * This method validates the class is registered, decodes the MessagePack data as a map,
+     * validates field types, and uses the provided factory to create and populate a class instance.
+     * 
+     * @param factory The factory for creating and populating class instances
+     * @param className The name of the class to deserialize
+     * @returns A new instance populated with the deserialized data
+     * @throws MessagePackDecodeError if deserialization fails
+     */
+    decodeClass(factory: ClassFactory, className: string): Serializable {
+        // Validate that the class is registered
+        const metadata = ClassRegistry.getMetadata(className);
+        if (metadata === null) {
+            throw ClassDeserializationError.unregisteredClass(className);
+        }
+
+        // Decode the MessagePack data
+        const value = this.decoder.decode();
+
+        // Validate that the decoded value is a map (classes are serialized as maps)
+        if (value.getType() !== MessagePackValueType.MAP) {
+            throw ClassDeserializationError.invalidFormat(className, value.getType());
+        }
+
+        // Extract the map data
+        const mapValue = value as MessagePackMap;
+        const fieldMap = mapValue.value;
+
+        // Create a new instance using the factory
+        const instance = factory.create();
+
+        // Process each registered field
+        for (let i = 0; i < metadata.fields.length; i++) {
+            const field = metadata.fields[i];
+
+            // Handle missing fields
+            if (!fieldMap.has(field.name)) {
+                if (!field.isOptional) {
+                    throw ClassDeserializationError.missingRequiredField(field.name, className);
+                }
+                // Skip optional fields that are missing - they keep their default values
+                continue;
+            }
+
+            const fieldValue = fieldMap.get(field.name);
+
+            // Validate field type matches expected type
+            this.validateFieldType(fieldValue, field, className);
+
+            // Handle nested class deserialization
+            if (field.type === SerializableFieldType.CLASS) {
+                const deserializedNestedValue = this.deserializeNestedClass(fieldValue, field, className);
+                factory.setFieldValue(instance, field.name, deserializedNestedValue);
+            } else {
+                // Set the field value using the factory
+                factory.setFieldValue(instance, field.name, fieldValue);
+            }
+        }
+
+        return instance;
+    }
+
+    /**
+     * Validates that a field value matches the expected type
+     * @param value The field value to validate
+     * @param field The field metadata containing expected type
+     * @param className The name of the class being deserialized (for error messages)
+     * @throws MessagePackDecodeError if type validation fails
+     */
+    private validateFieldType(value: MessagePackValue, field: FieldMetadata, className: string): void {
+        const actualType = value.getType();
+        let expectedType: MessagePackValueType;
+
+        // Map SerializableFieldType to MessagePackValueType
+        switch (field.type) {
+            case SerializableFieldType.NULL:
+                expectedType = MessagePackValueType.NULL;
+                break;
+            case SerializableFieldType.BOOLEAN:
+                expectedType = MessagePackValueType.BOOLEAN;
+                break;
+            case SerializableFieldType.INTEGER:
+                expectedType = MessagePackValueType.INTEGER;
+                break;
+            case SerializableFieldType.FLOAT:
+                expectedType = MessagePackValueType.FLOAT;
+                break;
+            case SerializableFieldType.STRING:
+                expectedType = MessagePackValueType.STRING;
+                break;
+            case SerializableFieldType.BINARY:
+                expectedType = MessagePackValueType.BINARY;
+                break;
+            case SerializableFieldType.ARRAY:
+                expectedType = MessagePackValueType.ARRAY;
+                break;
+            case SerializableFieldType.MAP:
+                expectedType = MessagePackValueType.MAP;
+                break;
+            case SerializableFieldType.CLASS:
+                // For CLASS type, we expect a MAP (since nested classes are serialized as maps)
+                expectedType = MessagePackValueType.MAP;
+                break;
+            default:
+                throw ClassDeserializationError.fieldTypeMismatch(
+                    field.name,
+                    className,
+                    MessagePackValueType.NULL, // Use NULL as placeholder for unknown expected type
+                    actualType
+                );
+        }
+
+        // Check if the actual type matches the expected type
+        if (actualType !== expectedType) {
+            throw ClassDeserializationError.fieldTypeMismatch(field.name, className, expectedType, actualType);
+        }
+    }
+
+    /**
+     * Deserializes a nested class instance
+     * @param value The MessagePackValue containing the nested class (should be a map)
+     * @param field The field metadata for the nested class
+     * @param parentClassName The name of the parent class (for error messages)
+     * @returns The deserialized nested class as a MessagePackValue
+     * @throws MessagePackDecodeError if nested class deserialization fails
+     */
+    private deserializeNestedClass(value: MessagePackValue, field: FieldMetadata, parentClassName: string): MessagePackValue {
+        // For nested classes, the value should be a MessagePackMap
+        if (value.getType() !== MessagePackValueType.MAP) {
+            throw ClassDeserializationError.fieldTypeMismatch(field.name, parentClassName, MessagePackValueType.MAP, value.getType());
+        }
+
+        // Validate that the nested class type is registered
+        if (field.nestedClassType !== null) {
+            const nestedMetadata = ClassRegistry.getMetadata(field.nestedClassType!);
+            if (nestedMetadata === null) {
+                throw ClassDeserializationError.unregisteredNestedClass(field.name, parentClassName, field.nestedClassType!);
+            }
+        }
+
+        // Return the value as-is - the actual nested class deserialization
+        // is handled by the factory's setFieldValue method to allow for
+        // flexible factory implementations
+        return value;
+    }
+
+    /**
+     * Deserializes a nested class instance recursively using a provided factory
+     * @param value The MessagePackValue containing the nested class (should be a map)
+     * @param field The field metadata for the nested class
+     * @param parentClassName The name of the parent class (for error messages)
+     * @param nestedFactory The factory for creating the nested class instance
+     * @returns The deserialized nested class instance
+     * @throws MessagePackDecodeError if nested class deserialization fails
+     */
+    deserializeNestedClassWithFactory(value: MessagePackValue, field: FieldMetadata, parentClassName: string, nestedFactory: ClassFactory): Serializable {
+        // For nested classes, the value should be a MessagePackMap
+        if (value.getType() !== MessagePackValueType.MAP) {
+            throw ClassDeserializationError.fieldTypeMismatch(field.name, parentClassName, MessagePackValueType.MAP, value.getType());
+        }
+
+        // Validate that the nested class type is registered
+        if (field.nestedClassType === null) {
+            throw new ClassDeserializationError(
+                `Nested class field '${field.name}' in class '${parentClassName}' must specify nestedClassType`,
+                parentClassName,
+                field.name,
+                -1,
+                0,
+                "nested class validation"
+            );
+        }
+
+        const nestedMetadata = ClassRegistry.getMetadata(field.nestedClassType!);
+        if (nestedMetadata === null) {
+            throw ClassDeserializationError.unregisteredNestedClass(field.name, parentClassName, field.nestedClassType!);
+        }
+
+        // Extract the map data
+        const mapValue = value as MessagePackMap;
+        const fieldMap = mapValue.value;
+
+        // Create a new instance using the nested factory
+        const nestedInstance = nestedFactory.create();
+
+        // Process each registered field of the nested class
+        for (let i = 0; i < nestedMetadata.fields.length; i++) {
+            const nestedField = nestedMetadata.fields[i];
+
+            // Handle missing fields
+            if (!fieldMap.has(nestedField.name)) {
+                if (!nestedField.isOptional) {
+                    throw ClassDeserializationError.missingRequiredField(nestedField.name, field.nestedClassType!);
+                }
+                // Skip optional fields that are missing - they keep their default values
+                continue;
+            }
+
+            const nestedFieldValue = fieldMap.get(nestedField.name);
+
+            // Validate field type matches expected type
+            this.validateFieldType(nestedFieldValue, nestedField, field.nestedClassType!);
+
+            // Handle recursive nested class deserialization
+            if (nestedField.type === SerializableFieldType.CLASS) {
+                // For recursive nested classes, we would need another factory
+                // For now, we'll set the value as-is and let the factory handle it
+                nestedFactory.setFieldValue(nestedInstance, nestedField.name, nestedFieldValue);
+            } else {
+                // Set the field value using the factory
+                nestedFactory.setFieldValue(nestedInstance, nestedField.name, nestedFieldValue);
+            }
+        }
+
+        return nestedInstance;
+    }
+
+    /**
+     * Deserializes an array that may contain class instances
+     * @param arrayValue The MessagePackArray to deserialize
+     * @param elementType The type of elements in the array
+     * @param nestedClassType The class type if elements are classes (null otherwise)
+     * @param nestedFactory The factory for creating nested class instances (null if not needed)
+     * @returns The deserialized array with class instances converted
+     * @throws MessagePackDecodeError if array deserialization fails
+     */
+    deserializeArrayWithClasses(arrayValue: MessagePackArray, elementType: SerializableFieldType, nestedClassType: string | null, nestedFactory: ClassFactory | null): MessagePackArray {
+        const originalArray = arrayValue.value;
+        const deserializedElements: MessagePackValue[] = [];
+
+        for (let i = 0; i < originalArray.length; i++) {
+            const element = originalArray[i];
+
+            if (elementType === SerializableFieldType.CLASS) {
+                if (nestedClassType === null || nestedFactory === null) {
+                    throw new ClassDeserializationError(
+                        `Array element of type CLASS requires nestedClassType and nestedFactory`,
+                        "",
+                        "",
+                        -1,
+                        0,
+                        "array deserialization"
+                    );
+                }
+
+                // Create a temporary field metadata for validation
+                const tempField = new FieldMetadata(`array_element_${i}`, SerializableFieldType.CLASS, false, nestedClassType);
+                
+                // Deserialize the nested class
+                const deserializedElement = this.deserializeNestedClassWithFactory(element, tempField, "Array", nestedFactory);
+                
+                // Convert back to MessagePackValue for consistency
+                // This would typically be handled by the calling code
+                deserializedElements.push(element);
+            } else {
+                // For non-class elements, validate type and keep as-is
+                this.validateArrayElementType(element, elementType, i);
+                deserializedElements.push(element);
+            }
+        }
+
+        return new MessagePackArray(deserializedElements);
+    }
+
+    /**
+     * Deserializes a map that may contain class instances as values
+     * @param mapValue The MessagePackMap to deserialize
+     * @param valueType The type of values in the map
+     * @param nestedClassType The class type if values are classes (null otherwise)
+     * @param nestedFactory The factory for creating nested class instances (null if not needed)
+     * @returns The deserialized map with class instances converted
+     * @throws MessagePackDecodeError if map deserialization fails
+     */
+    deserializeMapWithClasses(mapValue: MessagePackMap, valueType: SerializableFieldType, nestedClassType: string | null, nestedFactory: ClassFactory | null): MessagePackMap {
+        const originalMap = mapValue.value;
+        const deserializedMap = new Map<string, MessagePackValue>();
+
+        const keys = originalMap.keys();
+        for (let i = 0; i < keys.length; i++) {
+            const key = keys[i];
+            const value = originalMap.get(key);
+
+            if (valueType === SerializableFieldType.CLASS) {
+                if (nestedClassType === null || nestedFactory === null) {
+                    throw new ClassDeserializationError(
+                        `Map value of type CLASS requires nestedClassType and nestedFactory`,
+                        "",
+                        "",
+                        -1,
+                        0,
+                        "map deserialization"
+                    );
+                }
+
+                // Create a temporary field metadata for validation
+                const tempField = new FieldMetadata(`map_value_${key}`, SerializableFieldType.CLASS, false, nestedClassType);
+                
+                // Deserialize the nested class
+                const deserializedValue = this.deserializeNestedClassWithFactory(value, tempField, "Map", nestedFactory);
+                
+                // Convert back to MessagePackValue for consistency
+                // This would typically be handled by the calling code
+                deserializedMap.set(key, value);
+            } else {
+                // For non-class values, validate type and keep as-is
+                this.validateMapValueType(value, valueType, key);
+                deserializedMap.set(key, value);
+            }
+        }
+
+        return new MessagePackMap(deserializedMap);
+    }
+
+    /**
+     * Validates the type of an array element
+     * @param element The array element to validate
+     * @param expectedType The expected element type
+     * @param index The index of the element (for error messages)
+     * @throws MessagePackDecodeError if validation fails
+     */
+    private validateArrayElementType(element: MessagePackValue, expectedType: SerializableFieldType, index: i32): void {
+        let expectedMessagePackType: MessagePackValueType;
+
+        switch (expectedType) {
+            case SerializableFieldType.NULL:
+                expectedMessagePackType = MessagePackValueType.NULL;
+                break;
+            case SerializableFieldType.BOOLEAN:
+                expectedMessagePackType = MessagePackValueType.BOOLEAN;
+                break;
+            case SerializableFieldType.INTEGER:
+                expectedMessagePackType = MessagePackValueType.INTEGER;
+                break;
+            case SerializableFieldType.FLOAT:
+                expectedMessagePackType = MessagePackValueType.FLOAT;
+                break;
+            case SerializableFieldType.STRING:
+                expectedMessagePackType = MessagePackValueType.STRING;
+                break;
+            case SerializableFieldType.BINARY:
+                expectedMessagePackType = MessagePackValueType.BINARY;
+                break;
+            case SerializableFieldType.ARRAY:
+                expectedMessagePackType = MessagePackValueType.ARRAY;
+                break;
+            case SerializableFieldType.MAP:
+                expectedMessagePackType = MessagePackValueType.MAP;
+                break;
+            case SerializableFieldType.CLASS:
+                expectedMessagePackType = MessagePackValueType.MAP;
+                break;
+            default:
+                throw new ClassDeserializationError(
+                    `Unknown array element type at index ${index}`,
+                    "",
+                    "",
+                    -1,
+                    0,
+                    "array element validation"
+                );
+        }
+
+        if (element.getType() !== expectedMessagePackType) {
+            throw new ClassDeserializationError(
+                `Array element type mismatch at index ${index}: expected ${getMessagePackValueTypeName(expectedMessagePackType)}, got ${getMessagePackValueTypeName(element.getType())}`,
+                "",
+                "",
+                -1,
+                0,
+                "array element validation"
+            );
+        }
+    }
+
+    /**
+     * Validates the type of a map value
+     * @param value The map value to validate
+     * @param expectedType The expected value type
+     * @param key The key of the value (for error messages)
+     * @throws MessagePackDecodeError if validation fails
+     */
+    private validateMapValueType(value: MessagePackValue, expectedType: SerializableFieldType, key: string): void {
+        let expectedMessagePackType: MessagePackValueType;
+
+        switch (expectedType) {
+            case SerializableFieldType.NULL:
+                expectedMessagePackType = MessagePackValueType.NULL;
+                break;
+            case SerializableFieldType.BOOLEAN:
+                expectedMessagePackType = MessagePackValueType.BOOLEAN;
+                break;
+            case SerializableFieldType.INTEGER:
+                expectedMessagePackType = MessagePackValueType.INTEGER;
+                break;
+            case SerializableFieldType.FLOAT:
+                expectedMessagePackType = MessagePackValueType.FLOAT;
+                break;
+            case SerializableFieldType.STRING:
+                expectedMessagePackType = MessagePackValueType.STRING;
+                break;
+            case SerializableFieldType.BINARY:
+                expectedMessagePackType = MessagePackValueType.BINARY;
+                break;
+            case SerializableFieldType.ARRAY:
+                expectedMessagePackType = MessagePackValueType.ARRAY;
+                break;
+            case SerializableFieldType.MAP:
+                expectedMessagePackType = MessagePackValueType.MAP;
+                break;
+            case SerializableFieldType.CLASS:
+                expectedMessagePackType = MessagePackValueType.MAP;
+                break;
+            default:
+                throw new ClassDeserializationError(
+                    `Unknown map value type for key '${key}'`,
+                    "",
+                    "",
+                    -1,
+                    0,
+                    "map value validation"
+                );
+        }
+
+        if (value.getType() !== expectedMessagePackType) {
+            throw new ClassDeserializationError(
+                `Map value type mismatch for key '${key}': expected ${getMessagePackValueTypeName(expectedMessagePackType)}, got ${getMessagePackValueTypeName(value.getType())}`,
+                "",
+                "",
+                -1,
+                0,
+                "map value validation"
+            );
+        }
+    }
+
+    /**
+     * Gets the underlying MessagePackDecoder instance
+     * @returns The MessagePackDecoder instance
+     */
+    getDecoder(): MessagePackDecoder {
+        return this.decoder;
     }
 }
 

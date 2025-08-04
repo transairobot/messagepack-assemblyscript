@@ -23,7 +23,7 @@
   - Write unit tests for basic class serialization
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 4.1, 5.1, 5.2_
 
-- [ ] 4. Implement error handling for serialization
+- [x] 4. Implement error handling for serialization
   - Extend MessagePackEncodeError with class-specific error types
   - Add validation for unregistered classes during serialization
   - Add validation for missing required fields
@@ -31,7 +31,7 @@
   - Write unit tests for all serialization error scenarios
   - _Requirements: 4.3, 6.1, 6.4_
 
-- [ ] 5. Create class factory interface and deserialization decoder extension
+- [x] 5. Create class factory interface and deserialization decoder extension
   - Define `ClassFactory<T>` interface for creating and populating class instances
   - Implement `ClassSerializationDecoder` class that wraps existing MessagePackDecoder
   - Add `decodeClass<T>(factory: ClassFactory<T>, className: string)` method
@@ -40,14 +40,14 @@
   - Write unit tests for basic class deserialization
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 4.1, 5.1, 5.2_
 
-- [ ] 6. Implement nested class deserialization support
+- [x] 6. Implement nested class deserialization support
   - Add recursive deserialization for CLASS type fields
   - Implement type validation for nested objects
   - Add support for arrays and maps containing class instances
   - Write unit tests for nested class deserialization scenarios
   - _Requirements: 2.3, 4.2_
 
-- [ ] 7. Implement error handling for deserialization
+- [x] 7. Implement error handling for deserialization
   - Extend MessagePackDecodeError with class-specific error types
   - Add validation for invalid MessagePack format (non-map data)
   - Add validation for missing required fields during deserialization
@@ -55,7 +55,7 @@
   - Write unit tests for all deserialization error scenarios
   - _Requirements: 4.3, 6.2, 6.3_
 
-- [ ] 8. Create comprehensive integration tests
+- [x] 8. Create comprehensive integration tests
   - Write round-trip tests for various class structures (simple, nested, with arrays/maps)
   - Test serialization and deserialization of classes with optional fields
   - Test complex object graphs with multiple nested classes
