@@ -32,8 +32,13 @@ import {
     integer64ArrayToMessagePack,
     float32ArrayToMessagePack,
     float64ArrayToMessagePack,
-    stringArrayToMessagePack
+    stringArrayToMessagePack,
+    ClassRegistrationBuilder,
+    SerializationUtils,
+    BatchClassRegistration
 } from "../class-serialization";
+
+import { runConvenienceMethodTests } from "./convenience-methods.test";
 
 import { MessagePackEncoder } from "../encoder";
 import { MessagePackDecoder } from "../decoder";
@@ -2314,7 +2319,8 @@ export function runAllClassSerializationTests(): boolean {
         runClassSerializationDecoderTests(),
         runDeserializationErrorHandlingTests(),
         runNestedClassDeserializationTests(),
-        runComprehensiveIntegrationTests()
+        runComprehensiveIntegrationTests(),
+        runConvenienceMethodTests()
     ];
 
     const passed = results.filter(r => r).length;
@@ -3374,5 +3380,477 @@ export function runComprehensiveIntegrationTests(): boolean {
         console.log("❌ Some integration tests failed");
     }
 
+    return passed === total;
+}/**
+
+ * Test suite for ClassRegistrationBuilder
+ */
+export function runClassRegistrationBuilderTests(): boolean {
+    console.log("=== ClassRegistrationBuilder Tests ===");
+
+    let passed = 0;
+    let total = 0;
+
+    // Clear registry before tests
+    ClassRegistry.clear();
+
+    // Test 1: Basic builder functionality
+    total++;
+    const builder = new ClassRegistrationBuilder("TestClass");
+    builder.addStringField("name")
+        .addIntegerField("age")
+        .addBooleanField("active", true)
+        .register();
+
+    if (ClassRegistry.isRegistered("TestClass")) {
+        const metadata = ClassRegistry.getMetadata("TestClass");
+        if (metadata !== null && metadata.fields.length === 3) {
+            console.log("✓ Basic builder functionality works");
+            passed++;
+        } else {
+            console.log("✗ Builder created incorrect metadata");
+        }
+    } else {
+        console.log("✗ Builder failed to register class");
+    }
+
+    // Test 2: Builder with all field types
+    total++;
+    {
+        ClassRegistry.clear();
+        const builder = new ClassRegistrationBuilder("CompleteClass");
+        builder.addBooleanField("bool")
+            .addIntegerField("int")
+            .addFloatField("float")
+            .addStringField("str")
+            .addBinaryField("bin")
+            .addArrayField("arr")
+            .addMapField("map")
+            .addClassField("nested", "NestedClass")
+            .addNullField("nullField")
+            .register();
+
+        const metadata = ClassRegistry.getMetadata("CompleteClass");
+        if (metadata !== null && metadata.fields.length === 9) {
+            console.log("✓ Builder with all field types works");
+            passed++;
+        } else {
+            console.log("✗ Builder with all field types failed");
+        }
+    }
+
+    // Test 3: Builder field count and class name
+    total++;
+    try {
+        const builder = new ClassRegistrationBuilder("CountTest");
+        builder.addStringField("field1").addIntegerField("field2");
+
+        if (builder.getFieldCount() === 2 && builder.getClassName() === "CountTest") {
+            console.log("✓ Builder field count and class name work");
+            passed++;
+        } else {
+            console.log("✗ Builder field count or class name incorrect");
+        }
+    } catch (e) {
+        console.log("✗ Builder field count test threw error: " + e.toString());
+    }
+
+    console.log(`ClassRegistrationBuilder tests: ${passed}/${total} passed\n`);
+    return passed === total;
+}
+
+/**
+ * Test suite for BatchClassRegistration
+ */
+export function runBatchClassRegistrationTests(): boolean {
+    console.log("=== BatchClassRegistration Tests ===");
+
+    let passed = 0;
+    let total = 0;
+
+    // Clear registry before tests
+    ClassRegistry.clear();
+
+    // Test 1: Basic batch registration
+    total++;
+    try {
+        const batch = new BatchClassRegistration();
+
+        const builder1 = new ClassRegistrationBuilder("BatchClass1");
+        builder1.addStringField("name");
+
+        const builder2 = new ClassRegistrationBuilder("BatchClass2");
+        builder2.addIntegerField("value");
+
+        batch.addClass(builder1).addClass(builder2);
+        batch.registerAll();
+
+        if (ClassRegistry.isRegistered("BatchClass1") && ClassRegistry.isRegistered("BatchClass2")) {
+            console.log("✓ Basic batch registration works");
+            passed++;
+        } else {
+            console.log("✗ Basic batch registration failed");
+        }
+    } catch (e) {
+        console.log("✗ Basic batch registration threw error: " + e.toString());
+    }
+
+    // Test 2: Batch with createClass method
+    total++;
+    try {
+        ClassRegistry.clear();
+        const batch = new BatchClassRegistration();
+
+        batch.createClass("CreatedClass1").addStringField("field1");
+        batch.createClass("CreatedClass2").addIntegerField("field2");
+
+        if (batch.getClassCount() === 2) {
+            batch.registerAll();
+            if (ClassRegistry.isRegistered("CreatedClass1") && ClassRegistry.isRegistered("CreatedClass2")) {
+                console.log("✓ Batch createClass method works");
+                passed++;
+            } else {
+                console.log("✗ Batch createClass registration failed");
+            }
+        } else {
+            console.log("✗ Batch createClass count incorrect");
+        }
+    } catch (e) {
+        console.log("✗ Batch createClass threw error: " + e.toString());
+    }
+
+    // Test 3: Batch duplicate class name detection
+    total++;
+    try {
+        ClassRegistry.clear();
+        const batch = new BatchClassRegistration();
+
+        batch.createClass("DuplicateClass").addStringField("field1");
+        batch.createClass("DuplicateClass").addIntegerField("field2");
+
+        let errorThrown = false;
+        try {
+            batch.registerAll();
+        } catch (e) {
+            errorThrown = true;
+        }
+
+        if (errorThrown) {
+            console.log("✓ Batch duplicate class name detection works");
+            passed++;
+        } else {
+            console.log("✗ Batch duplicate class name detection failed");
+        }
+    } catch (e) {
+        console.log("✗ Batch duplicate class name test threw error: " + e.toString());
+    }
+
+    // Test 4: Batch clear functionality
+    total++;
+    try {
+        const batch = new BatchClassRegistration();
+        batch.createClass("ClearTest1").addStringField("field1");
+        batch.createClass("ClearTest2").addStringField("field2");
+
+        if (batch.getClassCount() === 2) {
+            batch.clear();
+            if (batch.getClassCount() === 0) {
+                console.log("✓ Batch clear functionality works");
+                passed++;
+            } else {
+                console.log("✗ Batch clear did not reset count");
+            }
+        } else {
+            console.log("✗ Batch clear test setup failed");
+        }
+    } catch (e) {
+        console.log("✗ Batch clear test threw error: " + e.toString());
+    }
+
+    console.log(`BatchClassRegistration tests: ${passed}/${total} passed\n`);
+    return passed === total;
+}
+
+/**
+ * Test suite for SerializationUtils
+ */
+export function runSerializationUtilsTests(): boolean {
+    console.log("=== SerializationUtils Tests ===");
+
+    let passed = 0;
+    let total = 0;
+
+    // Clear registry before tests
+    ClassRegistry.clear();
+
+    // Test 1: createEncoder and createDecoder
+    total++;
+    try {
+        const encoder = SerializationUtils.createEncoder();
+        const decoder = SerializationUtils.createDecoder();
+        if (encoder !== null && decoder !== null) {
+            console.log("✓ createEncoder and createDecoder work");
+            passed++;
+        } else {
+            console.log("✗ createEncoder or createDecoder returned null");
+        }
+    } catch (e) {
+        console.log("✗ createEncoder/createDecoder threw error: " + e.toString());
+    }
+
+    // Test 2: registration statistics methods
+    total++;
+    try {
+        ClassRegistry.clear();
+
+        // Register a test class
+        new ClassRegistrationBuilder("StatsTestClass")
+            .addStringField("field1")
+            .addIntegerField("field2")
+            .register();
+
+        const totalClasses = SerializationUtils.getTotalClasses();
+        const totalFields = SerializationUtils.getTotalFields();
+        const classNames = SerializationUtils.getRegisteredClassNames();
+
+        if (totalClasses === 1 && totalFields === 2 && classNames.length === 1) {
+            console.log("✓ registration statistics methods work");
+            passed++;
+        } else {
+            console.log("✗ registration statistics methods returned incorrect values");
+        }
+    } catch (e) {
+        console.log("✗ registration statistics methods threw error: " + e.toString());
+    }
+
+    // Test 3: createField method
+    total++;
+    try {
+        const field1 = SerializationUtils.createField("name", SerializableFieldType.STRING, false);
+        const field2 = SerializationUtils.createField("age", SerializableFieldType.INTEGER, true);
+
+        if (field1.name === "name" && field1.type === SerializableFieldType.STRING && !field1.isOptional &&
+            field2.name === "age" && field2.type === SerializableFieldType.INTEGER && field2.isOptional) {
+            console.log("✓ createField method works");
+            passed++;
+        } else {
+            console.log("✗ createField method created incorrect fields");
+        }
+    } catch (e) {
+        console.log("✗ createField method threw error: " + e.toString());
+    }
+
+    // Test 4: createNestedField method
+    total++;
+    try {
+        const field1 = SerializationUtils.createField("name", SerializableFieldType.STRING, false);
+        const field2 = SerializationUtils.createNestedField("nested", "NestedClass", true);
+
+        if (field1.name === "name" && field1.nestedClassType === null &&
+            field2.name === "nested" && field2.nestedClassType === "NestedClass") {
+            console.log("✓ createNestedField method works");
+            passed++;
+        } else {
+            console.log("✗ createNestedField method created incorrect fields");
+        }
+    } catch (e) {
+        console.log("✗ createNestedField method threw error: " + e.toString());
+    }
+
+    console.log(`SerializationUtils tests: ${passed}/${total} passed\n`);
+    return passed === total;
+}
+
+/**
+ * Test suite for Example Classes
+ */
+export function runExampleClassesTests(): boolean {
+    console.log("=== Example Classes Tests ===");
+
+    let passed = 0;
+    let total = 0;
+
+    // Clear registry before tests
+    ClassRegistry.clear();
+
+    // Test 1: ExamplePerson registration and basic functionality
+    total++;
+    try {
+        ExamplePerson.register();
+
+        const person = new ExamplePerson("John Doe", 30, true, "john@example.com");
+        if (person.getClassName() === "ExamplePerson" &&
+            person.getFieldValue("name") !== null &&
+            person.getFieldValue("age") !== null) {
+            console.log("✓ ExamplePerson registration and basic functionality work");
+            passed++;
+        } else {
+            console.log("✗ ExamplePerson basic functionality failed");
+        }
+    } catch (e) {
+        console.log("✗ ExamplePerson test threw error: " + e.toString());
+    }
+
+    // Test 2: ExamplePerson serialization roundtrip
+    total++;
+    try {
+        const person = new ExamplePerson("Jane Smith", 25, false, null);
+        const factory = new ExamplePersonFactory();
+
+        const serialized = SerializationUtils.serialize(person);
+        const deserialized = SerializationUtils.deserialize(serialized, factory, "ExamplePerson") as ExamplePerson;
+
+        if (deserialized.name === "Jane Smith" &&
+            deserialized.age === 25 &&
+            deserialized.isActive === false &&
+            deserialized.email === null) {
+            console.log("✓ ExamplePerson serialization roundtrip works");
+            passed++;
+        } else {
+            console.log("✗ ExamplePerson serialization roundtrip failed");
+        }
+    } catch (e) {
+        console.log("✗ ExamplePerson roundtrip threw error: " + e.toString());
+    }
+
+    // Test 3: ExampleProject with collections
+    total++;
+    try {
+        ExampleProject.register();
+
+        const tags = ["web", "frontend"];
+        const metadata = new Map<string, string>();
+        metadata.set("version", "1.0");
+        metadata.set("status", "active");
+
+        const project = new ExampleProject("Test Project", tags, metadata, 1);
+        const factory = new ExampleProjectFactory();
+
+        const serialized = SerializationUtils.serialize(project);
+        const deserialized = SerializationUtils.deserialize(serialized, factory, "ExampleProject") as ExampleProject;
+
+        if (deserialized.name === "Test Project" &&
+            deserialized.tags.length === 2 &&
+            deserialized.metadata.size === 2 &&
+            deserialized.priority === 1) {
+            console.log("✓ ExampleProject with collections works");
+            passed++;
+        } else {
+            console.log("✗ ExampleProject with collections failed");
+        }
+    } catch (e) {
+        console.log("✗ ExampleProject test threw error: " + e.toString());
+    }
+
+    // Test 4: registerExampleClasses batch registration
+    total++;
+    try {
+        ClassRegistry.clear();
+        registerExampleClasses();
+
+        if (ClassRegistry.isRegistered("ExamplePerson") &&
+            ClassRegistry.isRegistered("ExampleProject") &&
+            ClassRegistry.isRegistered("ExampleCompany")) {
+            console.log("✓ registerExampleClasses batch registration works");
+            passed++;
+        } else {
+            console.log("✗ registerExampleClasses batch registration failed");
+        }
+    } catch (e) {
+        console.log("✗ registerExampleClasses threw error: " + e.toString());
+    }
+
+    console.log(`Example Classes tests: ${passed}/${total} passed\n`);
+    return passed === total;
+}
+
+/**
+ * Test suite for convenience method integration
+ */
+export function runConvenienceMethodIntegrationTests(): boolean {
+    console.log("=== Convenience Method Integration Tests ===");
+
+    let passed = 0;
+    let total = 0;
+
+    // Clear registry before tests
+    ClassRegistry.clear();
+
+    // Test 1: Full workflow with builder pattern
+    total++;
+    try {
+        // Register classes using builder pattern
+        new ClassRegistrationBuilder("User")
+            .addStringField("username")
+            .addStringField("email")
+            .addIntegerField("userId")
+            .addBooleanField("isVerified", true)
+            .register();
+
+        // Validate registration
+        if (SerializationUtils.validateClassRegistration("User")) {
+            const totalClasses = SerializationUtils.getTotalClasses();
+            const totalFields = SerializationUtils.getTotalFields();
+            if (totalClasses === 1 && totalFields === 4) {
+                console.log("✓ Full workflow with builder pattern works");
+                passed++;
+            } else {
+                console.log("✗ Full workflow stats incorrect");
+            }
+        } else {
+            console.log("✗ Full workflow validation failed");
+        }
+    } catch (e) {
+        console.log("✗ Full workflow threw error: " + e.toString());
+    }
+
+    // Test 2: Batch registration with validation
+    total++;
+    {
+        ClassRegistry.clear();
+
+        const batch = new BatchClassRegistration();
+        batch.createClass("Product")
+            .addStringField("name")
+            .addFloatField("price")
+            .addIntegerField("stock");
+
+        batch.createClass("Order")
+            .addStringField("orderId")
+            .addArrayField("products")
+            .addFloatField("total");
+
+        batch.registerAll();
+
+        // Validate both classes
+        const validProduct = SerializationUtils.validateClassRegistration("Product");
+        const validOrder = SerializationUtils.validateClassRegistration("Order");
+
+        if (validProduct && validOrder) {
+            console.log("✓ Batch registration with validation works");
+            passed++;
+        } else {
+            console.log("✗ Batch registration validation failed");
+        }
+    }
+
+    // Test 3: Field creation utilities
+    total++;
+    {
+        const simpleField = SerializationUtils.createField("name", SerializableFieldType.STRING, false);
+        const optionalField = SerializationUtils.createField("count", SerializableFieldType.INTEGER, true);
+        const nestedField = SerializationUtils.createNestedField("owner", "User", false);
+
+        if (simpleField.name === "name" && !simpleField.isOptional &&
+            optionalField.name === "count" && optionalField.isOptional &&
+            nestedField.nestedClassType === "User") {
+            console.log("✓ Field creation utilities work");
+            passed++;
+        } else {
+            console.log("✗ Field creation utilities failed");
+        }
+    }
+
+    console.log(`Convenience Method Integration tests: ${passed}/${total} passed\n`);
     return passed === total;
 }

@@ -63,7 +63,7 @@
   - Write performance benchmarks comparing class serialization vs manual map creation
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 2.1, 2.2, 2.3, 2.4, 5.3_
 
-- [ ] 9. Add convenience methods and utilities
+- [-] 9. Add convenience methods and utilities
   - Create helper methods for common serialization patterns
   - Add utility functions for registering classes with builder pattern
   - Implement batch registration for multiple related classes

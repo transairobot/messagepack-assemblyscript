@@ -1547,3 +1547,719 @@ export function stringArrayToMessagePack(values: string[]): MessagePackArray {
     }
     return new MessagePackArray(messagePackValues);
 }
+
+// Convenience Methods and Utilities
+
+/**
+ * Builder class for creating class metadata with a fluent interface
+ * Provides a convenient way to register classes with method chaining
+ */
+export class ClassRegistrationBuilder {
+    private className: string;
+    private fields: FieldMetadata[];
+
+    /**
+     * Creates a new class registration builder
+     * @param className The name of the class to register
+     */
+    constructor(className: string) {
+        this.className = className;
+        this.fields = [];
+    }
+
+    /**
+     * Adds a boolean field to the class
+     * @param name The field name
+     * @param isOptional Whether the field is optional (defaults to false)
+     * @returns This builder instance for method chaining
+     */
+    addBooleanField(name: string, isOptional: boolean = false): ClassRegistrationBuilder {
+        this.fields.push(new FieldMetadata(name, SerializableFieldType.BOOLEAN, isOptional));
+        return this;
+    }
+
+    /**
+     * Adds an integer field to the class
+     * @param name The field name
+     * @param isOptional Whether the field is optional (defaults to false)
+     * @returns This builder instance for method chaining
+     */
+    addIntegerField(name: string, isOptional: boolean = false): ClassRegistrationBuilder {
+        this.fields.push(new FieldMetadata(name, SerializableFieldType.INTEGER, isOptional));
+        return this;
+    }
+
+    /**
+     * Adds a float field to the class
+     * @param name The field name
+     * @param isOptional Whether the field is optional (defaults to false)
+     * @returns This builder instance for method chaining
+     */
+    addFloatField(name: string, isOptional: boolean = false): ClassRegistrationBuilder {
+        this.fields.push(new FieldMetadata(name, SerializableFieldType.FLOAT, isOptional));
+        return this;
+    }
+
+    /**
+     * Adds a string field to the class
+     * @param name The field name
+     * @param isOptional Whether the field is optional (defaults to false)
+     * @returns This builder instance for method chaining
+     */
+    addStringField(name: string, isOptional: boolean = false): ClassRegistrationBuilder {
+        this.fields.push(new FieldMetadata(name, SerializableFieldType.STRING, isOptional));
+        return this;
+    }
+
+    /**
+     * Adds a binary field to the class
+     * @param name The field name
+     * @param isOptional Whether the field is optional (defaults to false)
+     * @returns This builder instance for method chaining
+     */
+    addBinaryField(name: string, isOptional: boolean = false): ClassRegistrationBuilder {
+        this.fields.push(new FieldMetadata(name, SerializableFieldType.BINARY, isOptional));
+        return this;
+    }
+
+    /**
+     * Adds an array field to the class
+     * @param name The field name
+     * @param isOptional Whether the field is optional (defaults to false)
+     * @returns This builder instance for method chaining
+     */
+    addArrayField(name: string, isOptional: boolean = false): ClassRegistrationBuilder {
+        this.fields.push(new FieldMetadata(name, SerializableFieldType.ARRAY, isOptional));
+        return this;
+    }
+
+    /**
+     * Adds a map field to the class
+     * @param name The field name
+     * @param isOptional Whether the field is optional (defaults to false)
+     * @returns This builder instance for method chaining
+     */
+    addMapField(name: string, isOptional: boolean = false): ClassRegistrationBuilder {
+        this.fields.push(new FieldMetadata(name, SerializableFieldType.MAP, isOptional));
+        return this;
+    }
+
+    /**
+     * Adds a nested class field to the class
+     * @param name The field name
+     * @param nestedClassName The name of the nested class type
+     * @param isOptional Whether the field is optional (defaults to false)
+     * @returns This builder instance for method chaining
+     */
+    addClassField(name: string, nestedClassName: string, isOptional: boolean = false): ClassRegistrationBuilder {
+        this.fields.push(new FieldMetadata(name, SerializableFieldType.CLASS, isOptional, nestedClassName));
+        return this;
+    }
+
+    /**
+     * Adds a null field to the class (primarily for testing)
+     * @param name The field name
+     * @param isOptional Whether the field is optional (defaults to true for null fields)
+     * @returns This builder instance for method chaining
+     */
+    addNullField(name: string, isOptional: boolean = true): ClassRegistrationBuilder {
+        this.fields.push(new FieldMetadata(name, SerializableFieldType.NULL, isOptional));
+        return this;
+    }
+
+    /**
+     * Registers the class with the ClassRegistry
+     * @throws MessagePackEncodeError if registration fails
+     */
+    register(): void {
+        ClassRegistry.register(this.className, this.fields);
+    }
+
+    /**
+     * Gets the current field count
+     * @returns The number of fields added so far
+     */
+    getFieldCount(): i32 {
+        return this.fields.length;
+    }
+
+    /**
+     * Gets the class name
+     * @returns The class name
+     */
+    getClassName(): string {
+        return this.className;
+    }
+
+    /**
+     * Gets a copy of the current fields array
+     * @returns Array of field metadata
+     */
+    getFields(): FieldMetadata[] {
+        const fieldsCopy: FieldMetadata[] = [];
+        for (let i = 0; i < this.fields.length; i++) {
+            fieldsCopy.push(this.fields[i]);
+        }
+        return fieldsCopy;
+    }
+}
+/**
+
+ * Utility class for batch registration of multiple related classes
+ * Provides methods to register multiple classes at once with validation
+ */
+export class BatchClassRegistration {
+    private builders: ClassRegistrationBuilder[];
+
+    /**
+     * Creates a new batch registration instance
+     */
+    constructor() {
+        this.builders = [];
+    }
+
+    /**
+     * Adds a class builder to the batch
+     * @param builder The class registration builder to add
+     * @returns This batch registration instance for method chaining
+     */
+    addClass(builder: ClassRegistrationBuilder): BatchClassRegistration {
+        this.builders.push(builder);
+        return this;
+    }
+
+    /**
+     * Creates and adds a new class builder to the batch
+     * @param className The name of the class
+     * @returns The new class registration builder for configuration
+     */
+    createClass(className: string): ClassRegistrationBuilder {
+        const builder = new ClassRegistrationBuilder(className);
+        this.builders.push(builder);
+        return builder;
+    }
+
+    /**
+     * Registers all classes in the batch
+     * If any registration fails, none of the classes will be registered
+     * @throws MessagePackEncodeError if any registration fails
+     */
+    registerAll(): void {
+        // First, validate that all class names are unique within the batch
+        const classNames = new Set<string>();
+        for (let i = 0; i < this.builders.length; i++) {
+            const className = this.builders[i].getClassName();
+            if (classNames.has(className)) {
+                throw new MessagePackEncodeError(
+                    `Duplicate class name '${className}' in batch registration`,
+                    -1,
+                    "batch registration validation"
+                );
+            }
+            classNames.add(className);
+        }
+
+        // Validate that no classes are already registered
+        for (let i = 0; i < this.builders.length; i++) {
+            const className = this.builders[i].getClassName();
+            if (ClassRegistry.isRegistered(className)) {
+                throw new MessagePackEncodeError(
+                    `Class '${className}' is already registered`,
+                    -1,
+                    "batch registration validation"
+                );
+            }
+        }
+
+        // Register all classes
+        for (let i = 0; i < this.builders.length; i++) {
+            this.builders[i].register();
+        }
+    }
+
+    /**
+     * Gets the number of classes in the batch
+     * @returns The number of classes to be registered
+     */
+    getClassCount(): i32 {
+        return this.builders.length;
+    }
+
+    /**
+     * Gets all class names in the batch
+     * @returns Array of class names
+     */
+    getClassNames(): string[] {
+        const names: string[] = [];
+        for (let i = 0; i < this.builders.length; i++) {
+            names.push(this.builders[i].getClassName());
+        }
+        return names;
+    }
+
+    /**
+     * Clears all classes from the batch
+     */
+    clear(): void {
+        this.builders = [];
+    }
+}/**
+ *
+ Utility class providing common serialization patterns and helper methods
+ */
+export class SerializationUtils {
+    /**
+     * Creates a simple encoder for class serialization
+     * @returns ClassSerializationEncoder instance
+     */
+    static createEncoder(): ClassSerializationEncoder {
+        const messagePackEncoder = new MessagePackEncoder();
+        return new ClassSerializationEncoder(messagePackEncoder);
+    }
+
+    /**
+     * Creates a simple decoder for class serialization
+     * @returns ClassSerializationDecoder instance
+     */
+    static createDecoder(): ClassSerializationDecoder {
+        const emptyBuffer = new Uint8Array(0);
+        const messagePackDecoder = new MessagePackDecoder(emptyBuffer);
+        return new ClassSerializationDecoder(messagePackDecoder);
+    }
+
+    /**
+     * Serializes a class instance to binary data
+     * @param instance The class instance to serialize
+     * @returns Binary data as Uint8Array
+     */
+    static serialize<T extends Serializable>(instance: T): Uint8Array {
+        const encoder = SerializationUtils.createEncoder();
+        return encoder.encodeClass(instance);
+    }
+
+    /**
+     * Deserializes binary data to a class instance
+     * @param data The binary data to deserialize
+     * @param factory The factory for creating class instances
+     * @param className The name of the class to deserialize
+     * @returns The deserialized class instance
+     */
+    static deserialize(data: Uint8Array, factory: ClassFactory, className: string): Serializable {
+        const messagePackDecoder = new MessagePackDecoder(data);
+        const decoder = new ClassSerializationDecoder(messagePackDecoder);
+        return decoder.decodeClass(factory, className);
+    }
+
+    /**
+     * Performs a roundtrip test: serialize then deserialize
+     * @param instance The instance to test
+     * @param factory The factory for creating instances
+     * @returns The deserialized instance
+     */
+    static roundtrip<T extends Serializable>(instance: T, factory: ClassFactory): Serializable {
+        const serialized = SerializationUtils.serialize(instance);
+        return SerializationUtils.deserialize(serialized, factory, instance.getClassName());
+    }
+
+    /**
+     * Validates that a class is properly registered and has all required metadata
+     * @param className The name of the class to validate
+     * @returns True if the class is valid for serialization
+     * @throws MessagePackEncodeError if validation fails
+     */
+    static validateClassRegistration(className: string): boolean {
+        const metadata = ClassRegistry.getMetadata(className);
+        if (metadata === null) {
+            throw ClassSerializationError.unregisteredClass(className);
+        }
+
+        // Validate nested class references
+        for (let i = 0; i < metadata.fields.length; i++) {
+            const field = metadata.fields[i];
+            if (field.type === SerializableFieldType.CLASS && field.nestedClassType !== null) {
+                const nestedMetadata = ClassRegistry.getMetadata(field.nestedClassType!);
+                if (nestedMetadata === null) {
+                    throw ClassSerializationError.unregisteredNestedClass(field.name, className, field.nestedClassType!);
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Gets the total number of registered classes
+     * @returns Number of registered classes
+     */
+    static getTotalClasses(): i32 {
+        return ClassRegistry.getRegisteredCount();
+    }
+
+    /**
+     * Gets all registered class names
+     * @returns Array of class names
+     */
+    static getRegisteredClassNames(): string[] {
+        return ClassRegistry.getRegisteredClasses();
+    }
+
+    /**
+     * Gets the total number of fields across all registered classes
+     * @returns Total field count
+     */
+    static getTotalFields(): i32 {
+        const classNames = ClassRegistry.getRegisteredClasses();
+        let totalFields = 0;
+
+        for (let i = 0; i < classNames.length; i++) {
+            const metadata = ClassRegistry.getMetadata(classNames[i]);
+            if (metadata !== null) {
+                totalFields += metadata.fields.length;
+            }
+        }
+
+        return totalFields;
+    }
+
+    /**
+     * Creates a field metadata instance with basic parameters
+     * @param name The field name
+     * @param type The field type
+     * @param isOptional Whether the field is optional
+     * @returns FieldMetadata instance
+     */
+    static createField(name: string, type: SerializableFieldType, isOptional: boolean = false): FieldMetadata {
+        return new FieldMetadata(name, type, isOptional);
+    }
+
+    /**
+     * Creates a field metadata instance for nested classes
+     * @param name The field name
+     * @param nestedClassName The nested class name
+     * @param isOptional Whether the field is optional
+     * @returns FieldMetadata instance
+     */
+    static createNestedField(name: string, nestedClassName: string, isOptional: boolean = false): FieldMetadata {
+        return new FieldMetadata(name, SerializableFieldType.CLASS, isOptional, nestedClassName);
+    }
+}//
+// Example Classes for Demonstration
+
+/**
+ * Example simple class with basic field types
+ * Demonstrates basic serialization patterns
+ */
+export class ExamplePerson implements Serializable {
+    public name: string;
+    public age: i32;
+    public isActive: boolean;
+    public email: string | null;
+
+    constructor(name: string, age: i32, isActive: boolean, email: string | null = null) {
+        this.name = name;
+        this.age = age;
+        this.isActive = isActive;
+        this.email = email;
+    }
+
+    getClassName(): string {
+        return "ExamplePerson";
+    }
+
+    getFieldValue(fieldName: string): MessagePackValue | null {
+        if (fieldName === "name") {
+            return toMessagePackString(this.name);
+        } else if (fieldName === "age") {
+            return toMessagePackInteger32(this.age);
+        } else if (fieldName === "isActive") {
+            return toMessagePackBoolean(this.isActive);
+        } else if (fieldName === "email") {
+            return toMessagePackNullableString(this.email);
+        } else {
+            return null;
+        }
+    }
+
+    /**
+     * Static method to register this class with the registry
+     */
+    static register(): void {
+        new ClassRegistrationBuilder("ExamplePerson")
+            .addStringField("name")
+            .addIntegerField("age")
+            .addBooleanField("isActive")
+            .addStringField("email", true) // optional
+            .register();
+    }
+}
+
+/**
+ * Factory for creating ExamplePerson instances
+ */
+export class ExamplePersonFactory implements ClassFactory {
+    create(): Serializable {
+        return new ExamplePerson("", 0, false, null);
+    }
+
+    setFieldValue(instance: Serializable, fieldName: string, value: MessagePackValue): void {
+        const person = instance as ExamplePerson;
+        
+        if (fieldName === "name") {
+            const nameValue = value as MessagePackString;
+            person.name = nameValue.value;
+        } else if (fieldName === "age") {
+            const ageValue = value as MessagePackInteger;
+            person.age = ageValue.value as i32;
+        } else if (fieldName === "isActive") {
+            const activeValue = value as MessagePackBoolean;
+            person.isActive = activeValue.value;
+        } else if (fieldName === "email") {
+            if (value.getType() === MessagePackValueType.NULL) {
+                person.email = null;
+            } else {
+                const emailValue = value as MessagePackString;
+                person.email = emailValue.value;
+            }
+        }
+    }
+}
+
+/**
+ * Example class with array and map fields
+ * Demonstrates collection serialization patterns
+ */
+export class ExampleProject implements Serializable {
+    public name: string;
+    public tags: string[];
+    public metadata: Map<string, string>;
+    public priority: i32;
+
+    constructor(name: string, tags: string[], metadata: Map<string, string>, priority: i32) {
+        this.name = name;
+        this.tags = tags;
+        this.metadata = metadata;
+        this.priority = priority;
+    }
+
+    getClassName(): string {
+        return "ExampleProject";
+    }
+
+    getFieldValue(fieldName: string): MessagePackValue | null {
+        switch (fieldName) {
+            case "name":
+                return toMessagePackString(this.name);
+            case "tags":
+                return stringArrayToMessagePack(this.tags);
+            case "metadata":
+                const metadataMap = new Map<string, MessagePackValue>();
+                const keys = this.metadata.keys();
+                for (let i = 0; i < keys.length; i++) {
+                    const key = keys[i];
+                    metadataMap.set(key, toMessagePackString(this.metadata.get(key)));
+                }
+                return toMessagePackMap(metadataMap);
+            case "priority":
+                return toMessagePackInteger32(this.priority);
+            default:
+                return null;
+        }
+    }
+
+    /**
+     * Static method to register this class with the registry
+     */
+    static register(): void {
+        new ClassRegistrationBuilder("ExampleProject")
+            .addStringField("name")
+            .addArrayField("tags")
+            .addMapField("metadata")
+            .addIntegerField("priority")
+            .register();
+    }
+}
+
+/**
+ * Factory for creating ExampleProject instances
+ */
+export class ExampleProjectFactory implements ClassFactory {
+    create(): Serializable {
+        return new ExampleProject("", [], new Map<string, string>(), 0);
+    }
+
+    setFieldValue(instance: Serializable, fieldName: string, value: MessagePackValue): void {
+        const project = instance as ExampleProject;
+        
+        switch (fieldName) {
+            case "name":
+                const nameValue = value as MessagePackString;
+                project.name = nameValue.value;
+                break;
+            case "tags":
+                const tagsValue = value as MessagePackArray;
+                const tags: string[] = [];
+                for (let i = 0; i < tagsValue.value.length; i++) {
+                    const tagValue = tagsValue.value[i] as MessagePackString;
+                    tags.push(tagValue.value);
+                }
+                project.tags = tags;
+                break;
+            case "metadata":
+                const metadataValue = value as MessagePackMap;
+                const metadata = new Map<string, string>();
+                const keys = metadataValue.value.keys();
+                for (let i = 0; i < keys.length; i++) {
+                    const key = keys[i];
+                    const val = metadataValue.value.get(key) as MessagePackString;
+                    metadata.set(key, val.value);
+                }
+                project.metadata = metadata;
+                break;
+            case "priority":
+                const priorityValue = value as MessagePackInteger;
+                project.priority = priorityValue.value as i32;
+                break;
+        }
+    }
+}
+
+/**
+ * Example class with nested class field
+ * Demonstrates nested class serialization patterns
+ */
+export class ExampleCompany implements Serializable {
+    public name: string;
+    public founder: ExamplePerson;
+    public employees: ExamplePerson[];
+    public established: i32;
+
+    constructor(name: string, founder: ExamplePerson, employees: ExamplePerson[], established: i32) {
+        this.name = name;
+        this.founder = founder;
+        this.employees = employees;
+        this.established = established;
+    }
+
+    getClassName(): string {
+        return "ExampleCompany";
+    }
+
+    getFieldValue(fieldName: string): MessagePackValue | null {
+        switch (fieldName) {
+            case "name":
+                return toMessagePackString(this.name);
+            case "founder":
+                // Serialize the nested person object
+                const founderSerialized = SerializationUtils.serialize(this.founder);
+                const founderDecoder = new MessagePackDecoder();
+                founderDecoder.setData(founderSerialized);
+                return founderDecoder.decode();
+            case "employees":
+                const employeeValues: MessagePackValue[] = [];
+                for (let i = 0; i < this.employees.length; i++) {
+                    const empSerialized = SerializationUtils.serialize(this.employees[i]);
+                    const empDecoder = new MessagePackDecoder();
+                    empDecoder.setData(empSerialized);
+                    employeeValues.push(empDecoder.decode());
+                }
+                return toMessagePackArray(employeeValues);
+            case "established":
+                return toMessagePackInteger32(this.established);
+            default:
+                return null;
+        }
+    }
+
+    /**
+     * Static method to register this class with the registry
+     */
+    static register(): void {
+        new ClassRegistrationBuilder("ExampleCompany")
+            .addStringField("name")
+            .addClassField("founder", "ExamplePerson")
+            .addArrayField("employees") // Array of ExamplePerson objects
+            .addIntegerField("established")
+            .register();
+    }
+}
+
+/**
+ * Factory for creating ExampleCompany instances
+ */
+export class ExampleCompanyFactory implements ClassFactory {
+    private personFactory: ExamplePersonFactory;
+
+    constructor() {
+        this.personFactory = new ExamplePersonFactory();
+    }
+
+    create(): Serializable {
+        const defaultFounder = new ExamplePerson("", 0, false, null);
+        return new ExampleCompany("", defaultFounder, [], 0);
+    }
+
+    setFieldValue(instance: Serializable, fieldName: string, value: MessagePackValue): void {
+        const company = instance as ExampleCompany;
+        
+        switch (fieldName) {
+            case "name":
+                const nameValue = value as MessagePackString;
+                company.name = nameValue.value;
+                break;
+            case "founder":
+                // Deserialize the nested person object
+                const founderMap = value as MessagePackMap;
+                const founderEncoder = new MessagePackEncoder();
+                const founderData = founderEncoder.encodeMap(founderMap.value);
+                company.founder = SerializationUtils.deserialize(founderData, this.personFactory, "ExamplePerson") as ExamplePerson;
+                break;
+            case "employees":
+                const employeesValue = value as MessagePackArray;
+                const employees: ExamplePerson[] = [];
+                for (let i = 0; i < employeesValue.value.length; i++) {
+                    const empMap = employeesValue.value[i] as MessagePackMap;
+                    const empEncoder = new MessagePackEncoder();
+                    const empData = empEncoder.encodeMap(empMap.value);
+                    const emp = SerializationUtils.deserialize(empData, this.personFactory, "ExamplePerson") as ExamplePerson;
+                    employees.push(emp);
+                }
+                company.employees = employees;
+                break;
+            case "established":
+                const establishedValue = value as MessagePackInteger;
+                company.established = establishedValue.value as i32;
+                break;
+        }
+    }
+}
+
+/**
+ * Utility function to register all example classes at once
+ * Demonstrates batch registration pattern
+ */
+export function registerExampleClasses(): void {
+    const batch = new BatchClassRegistration();
+    
+    // Register Person class
+    batch.createClass("ExamplePerson")
+        .addStringField("name")
+        .addIntegerField("age")
+        .addBooleanField("isActive")
+        .addStringField("email", true);
+    
+    // Register Project class
+    batch.createClass("ExampleProject")
+        .addStringField("name")
+        .addArrayField("tags")
+        .addMapField("metadata")
+        .addIntegerField("priority");
+    
+    // Register Company class (depends on Person)
+    batch.createClass("ExampleCompany")
+        .addStringField("name")
+        .addClassField("founder", "ExamplePerson")
+        .addArrayField("employees")
+        .addIntegerField("established");
+    
+    batch.registerAll();
+}
