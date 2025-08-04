@@ -2,6 +2,7 @@
  * Unit tests for class serialization metadata and registry system
  */
 
+import { runPerformanceOptimizationTests } from "./performance-optimization.test";
 import {
     SerializableFieldType,
     FieldMetadata,
@@ -3365,7 +3366,8 @@ export function runComprehensiveIntegrationTests(): boolean {
         runNestedClassRoundTripTests(),
         runComplexObjectGraphTests(),
         runMessagePackCompatibilityTests(),
-        runPerformanceBenchmarkTests()
+        runPerformanceBenchmarkTests(),
+        runPerformanceOptimizationTests()
     ];
 
     const passed = results.filter(r => r).length;

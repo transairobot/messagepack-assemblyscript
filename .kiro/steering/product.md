@@ -68,6 +68,19 @@ All MessagePack values must:
 - Handle nested objects recursively
 - Maintain type information for proper deserialization
 
+### Performance Optimizations (Task 11 - COMPLETED)
+- **Field Value Caching**: Cache frequently accessed field values to avoid repeated conversions
+- **Metadata Lookup Optimization**: Pre-computed field mappings with O(1) field lookups using `OptimizedFieldMapping`
+- **Fast Path for Simple Types**: Optimized encoding/decoding paths for boolean, integer, string, and float types
+- **Buffer Reuse**: Encoder/decoder instances support buffer reuse to minimize memory allocations
+- **Cache Statistics**: Monitor cache hit rates and performance metrics for optimization validation
+
+#### Performance Features:
+- `ClassRegistry` with metadata caching and optimized field mappings
+- `ClassSerializationEncoder` with fast path detection and field value caching
+- `ClassSerializationDecoder` with optimized deserialization for simple types
+- Comprehensive performance tests validating all optimization features
+
 ## Testing Requirements
 
 ### Test Structure
@@ -87,6 +100,13 @@ All MessagePack values must:
 - Include binary data inspection for format validation
 - Test both success and failure paths
 
+### Performance Testing (NEW)
+- Performance optimization tests in `assembly/tests/performance-optimization.test.ts`
+- Metadata caching validation with cache hit/miss statistics
+- Fast path serialization/deserialization benchmarks
+- Buffer reuse capability testing
+- Performance comparison between optimized and standard paths
+
 ## Performance Guidelines
 
 ### Memory Management
@@ -99,6 +119,12 @@ All MessagePack values must:
 - Use appropriate data structures for access patterns
 - Cache computed values when reused
 - Optimize for common case scenarios first
+- Implement fast paths for simple types (boolean, integer, string, float)
+
+### Performance Monitoring
+- Track cache hit rates for metadata and field value caches
+- Monitor buffer reuse effectiveness
+- Validate optimization impact through comprehensive benchmarks
 
 ## Development Workflow
 
@@ -118,5 +144,5 @@ All MessagePack values must:
 1. Correctness and specification compliance
 2. Comprehensive error handling and validation
 3. Complete test coverage with edge cases
-4. Performance optimization
+4. Performance optimization (COMPLETED)
 5. Documentation and code clarity

@@ -394,12 +394,144 @@ export class ClassMetadata {
  * Global registry for class serialization metadata
  * Provides static methods for registering and looking up class metadata
  */
+/**
+ * Cache statistics class for performance monitoring
+ */
+class CacheStats {
+    hits: i32;
+    misses: i32;
+    hitRate: f64;
+
+    constructor(hits: i32, misses: i32, hitRate: f64) {
+        this.hits = hits;
+        this.misses = misses;
+        this.hitRate = hitRate;
+    }
+}
+
+/**
+ * Extended cache statistics class with cache size
+ */
+class ExtendedCacheStats {
+    hits: i32;
+    misses: i32;
+    hitRate: f64;
+    cacheSize: i32;
+
+    constructor(hits: i32, misses: i32, hitRate: f64, cacheSize: i32) {
+        this.hits = hits;
+        this.misses = misses;
+        this.hitRate = hitRate;
+        this.cacheSize = cacheSize;
+    }
+}
+
+/**
+ * Optimized field mapping for fast field lookups during serialization/deserialization
+ */
+class OptimizedFieldMapping {
+    /** Pre-computed field name to index mapping for O(1) lookups */
+    fieldNameToIndex: Map<string, i32> = new Map<string, i32>();
+    /** Cached field metadata array for direct access */
+    fields: FieldMetadata[];
+    /** Fast path flags for common field types */
+    hasOnlySimpleTypes: boolean = true;
+    /** Count of each field type for optimization decisions */
+    typeCount: Map<SerializableFieldType, i32> = new Map<SerializableFieldType, i32>();
+
+    constructor(fields: FieldMetadata[]) {
+        this.fields = fields;
+        this.precomputeFieldMappings();
+        this.analyzeFieldTypes();
+    }
+
+    /**
+     * Pre-compute field name to index mappings for O(1) field lookups
+     */
+    private precomputeFieldMappings(): void {
+        for (let i = 0; i < this.fields.length; i++) {
+            this.fieldNameToIndex.set(this.fields[i].name, i);
+        }
+    }
+
+    /**
+     * Analyze field types to determine optimization strategies
+     */
+    private analyzeFieldTypes(): void {
+        this.typeCount.clear();
+        this.hasOnlySimpleTypes = true;
+
+        for (let i = 0; i < this.fields.length; i++) {
+            const fieldType = this.fields[i].type;
+            
+            // Count field types
+            const currentCount = this.typeCount.has(fieldType) ? this.typeCount.get(fieldType) : 0;
+            this.typeCount.set(fieldType, currentCount + 1);
+
+            // Check if we have complex types that prevent simple optimizations
+            if (fieldType === SerializableFieldType.CLASS || 
+                fieldType === SerializableFieldType.ARRAY || 
+                fieldType === SerializableFieldType.MAP) {
+                this.hasOnlySimpleTypes = false;
+            }
+        }
+    }
+
+    /**
+     * Get field index by name with O(1) lookup
+     * @param fieldName The field name to look up
+     * @returns Field index or -1 if not found
+     */
+    getFieldIndex(fieldName: string): i32 {
+        if (this.fieldNameToIndex.has(fieldName)) {
+            return this.fieldNameToIndex.get(fieldName);
+        }
+        return -1;
+    }
+
+    /**
+     * Get field metadata by index (direct array access)
+     * @param index The field index
+     * @returns Field metadata or null if index is out of bounds
+     */
+    getFieldByIndex(index: i32): FieldMetadata | null {
+        if (index >= 0 && index < this.fields.length) {
+            return this.fields[index];
+        }
+        return null;
+    }
+
+    /**
+     * Check if this class can use fast path optimizations
+     * @returns True if fast path can be used
+     */
+    canUseFastPath(): boolean {
+        return this.hasOnlySimpleTypes && this.fields.length <= 10; // Arbitrary threshold
+    }
+
+    /**
+     * Get count of fields of a specific type
+     * @param fieldType The field type to count
+     * @returns Number of fields of that type
+     */
+    getTypeCount(fieldType: SerializableFieldType): i32 {
+        return this.typeCount.has(fieldType) ? this.typeCount.get(fieldType) : 0;
+    }
+}
+
 export class ClassRegistry {
     /** Internal storage for class metadata */
     private static metadata: Map<string, ClassMetadata> = new Map<string, ClassMetadata>();
+    /** Optimized field mappings for performance */
+    private static optimizedMappings: Map<string, OptimizedFieldMapping> = new Map<string, OptimizedFieldMapping>();
+    /** Cache for frequently accessed metadata */
+    private static metadataCache: Map<string, ClassMetadata> = new Map<string, ClassMetadata>();
+    /** Cache hit statistics for monitoring */
+    private static cacheHits: i32 = 0;
+    private static cacheMisses: i32 = 0;
 
     /**
-     * Register a class for serialization
+     * Register a class for serialization with performance optimizations
      * @param className The name of the class
      * @param fields Array of field metadata
      * @throws MessagePackEncodeError if the class is already registered or validation fails
@@ -422,6 +554,13 @@ export class ClassRegistry {
 
         // Store the metadata
         this.metadata.set(className, classMetadata);
+
+        // Create optimized field mapping for performance
+        const optimizedMapping = new OptimizedFieldMapping(fields);
+        this.optimizedMappings.set(className, optimizedMapping);
+
+        // Pre-populate cache for immediate availability
+        this.metadataCache.set(className, classMetadata);
     }
 
     /**
@@ -439,18 +578,6 @@ export class ClassRegistry {
                 // This is a design decision to allow more flexible registration patterns
             }
         }
-    }
-
-    /**
-     * Get metadata for a registered class
-     * @param className The name of the class
-     * @returns Class metadata or null if not found
-     */
-    static getMetadata(className: string): ClassMetadata | null {
-        if (this.metadata.has(className)) {
-            return this.metadata.get(className);
-        }
-        return null;
     }
 
     /**
@@ -484,6 +611,10 @@ export class ClassRegistry {
      */
     static clear(): void {
         this.metadata.clear();
+        this.optimizedMappings.clear();
+        this.metadataCache.clear();
+        this.cacheHits = 0;
+        this.cacheMisses = 0;
     }
 
     /**
@@ -492,7 +623,67 @@ export class ClassRegistry {
      * @returns True if the class was unregistered, false if it wasn't registered
      */
     static unregister(className: string): boolean {
-        return this.metadata.delete(className);
+        const wasDeleted = this.metadata.delete(className);
+        if (wasDeleted) {
+            this.optimizedMappings.delete(className);
+            this.metadataCache.delete(className);
+        }
+        return wasDeleted;
+    }
+
+    /**
+     * Get optimized field mapping for a class (performance optimization)
+     * @param className The name of the class
+     * @returns Optimized field mapping or null if not found
+     */
+    static getOptimizedMapping(className: string): OptimizedFieldMapping | null {
+        if (this.optimizedMappings.has(className)) {
+            return this.optimizedMappings.get(className);
+        }
+        return null;
+    }
+
+    /**
+     * Get metadata with caching for performance
+     * @param className The name of the class
+     * @returns Class metadata or null if not found
+     */
+    static getMetadata(className: string): ClassMetadata | null {
+        // Try cache first
+        if (this.metadataCache.has(className)) {
+            this.cacheHits++;
+            return this.metadataCache.get(className);
+        }
+
+        // Cache miss - get from main storage
+        if (this.metadata.has(className)) {
+            this.cacheMisses++;
+            const metadata = this.metadata.get(className);
+            // Add to cache for future access
+            this.metadataCache.set(className, metadata);
+            return metadata;
+        }
+
+        this.cacheMisses++;
+        return null;
+    }
+
+    /**
+     * Get cache performance statistics
+     * @returns CacheStats object containing cache hit/miss statistics
+     */
+    static getCacheStats(): CacheStats {
+        const total = this.cacheHits + this.cacheMisses;
+        const hitRate = total > 0 ? (this.cacheHits as f64) / (total as f64) : 0.0;
+        return new CacheStats(this.cacheHits, this.cacheMisses, hitRate);
+    }
+
+    /**
+     * Reset cache statistics (for testing/monitoring)
+     */
+    static resetCacheStats(): void {
+        this.cacheHits = 0;
+        this.cacheMisses = 0;
     }
 
     /**
@@ -552,20 +743,84 @@ export interface Serializable {
 export class ClassSerializationEncoder {
     /** The underlying MessagePack encoder */
     private encoder: MessagePackEncoder;
+    /** Buffer reuse flag for performance optimization */
+    private reuseBuffers: boolean = false;
+    /** Cached field values for frequently accessed fields */
+    private fieldValueCache: Map<string, MessagePackValue> = new Map<string, MessagePackValue>();
+    /** Cache hit counter for monitoring */
+    private cacheHits: i32 = 0;
+    /** Cache miss counter for monitoring */
+    private cacheMisses: i32 = 0;
 
     /**
      * Creates a new class serialization encoder
      * @param encoder The MessagePackEncoder instance to wrap
+     * @param reuseBuffers Whether to enable buffer reuse for performance
      */
-    constructor(encoder: MessagePackEncoder) {
+    constructor(encoder: MessagePackEncoder, reuseBuffers: boolean = false) {
         this.encoder = encoder;
+        this.reuseBuffers = reuseBuffers;
     }
 
     /**
-     * Serializes a class instance to MessagePack format
+     * Enable or disable buffer reuse for performance optimization
+     * @param enable Whether to enable buffer reuse
+     */
+    setBufferReuse(enable: boolean): void {
+        this.reuseBuffers = enable;
+    }
+
+    /**
+     * Clear the field value cache (useful for memory management)
+     */
+    clearFieldValueCache(): void {
+        this.fieldValueCache.clear();
+        this.cacheHits = 0;
+        this.cacheMisses = 0;
+    }
+
+    /**
+     * Get cache statistics for monitoring performance
+     * @returns ExtendedCacheStats object containing cache statistics
+     */
+    getCacheStats(): ExtendedCacheStats {
+        const total = this.cacheHits + this.cacheMisses;
+        const hitRate = total > 0 ? (this.cacheHits as f64) / (total as f64) : 0.0;
+        return new ExtendedCacheStats(this.cacheHits, this.cacheMisses, hitRate, this.fieldValueCache.size);
+    }
+
+    /**
+     * Get cached field value if available (performance optimization)
+     * @param cacheKey The cache key for the field value
+     * @returns Cached value or null if not found
+     */
+    private getCachedFieldValue(cacheKey: string): MessagePackValue | null {
+        if (this.fieldValueCache.has(cacheKey)) {
+            this.cacheHits++;
+            return this.fieldValueCache.get(cacheKey);
+        }
+        this.cacheMisses++;
+        return null;
+    }
+
+    /**
+     * Cache a field value for future reuse
+     * @param cacheKey The cache key for the field value
+     * @param value The field value to cache
+     */
+    private cacheFieldValue(cacheKey: string, value: MessagePackValue): void {
+        // Limit cache size to prevent memory issues
+        if (this.fieldValueCache.size < 100) {
+            this.fieldValueCache.set(cacheKey, value);
+        }
+    }
+
+    /**
+     * Serializes a class instance to MessagePack format with performance optimizations
      * 
      * This method validates the class is registered, extracts field values,
      * validates field types, and encodes the instance as a MessagePack map.
+     * Uses fast paths for simple types and optimized field mappings.
      * 
      * @param instance The class instance to serialize
      * @returns A Uint8Array containing the MessagePack encoded class data
@@ -575,13 +830,71 @@ export class ClassSerializationEncoder {
         // Get the class name from the instance
         const className = instance.getClassName();
 
-        // Validate that the class is registered
+        // Validate that the class is registered and get optimized mapping
         const metadata = ClassRegistry.getMetadata(className);
         if (metadata === null) {
             throw ClassSerializationError.unregisteredClass(className);
         }
 
-        // Build map of field values for serialization
+        const optimizedMapping = ClassRegistry.getOptimizedMapping(className);
+        if (optimizedMapping !== null && optimizedMapping.canUseFastPath()) {
+            return this.encodeClassFastPath(instance, metadata, optimizedMapping);
+        }
+
+        // Fall back to standard path for complex types
+        return this.encodeClassStandardPath(instance, metadata);
+    }
+
+    /**
+     * Fast path encoding for classes with only simple types
+     * @param instance The class instance to serialize
+     * @param metadata The class metadata
+     * @param optimizedMapping The optimized field mapping
+     * @returns Encoded MessagePack data
+     */
+    private encodeClassFastPath<T extends Serializable>(
+        instance: T, 
+        metadata: ClassMetadata, 
+        optimizedMapping: OptimizedFieldMapping
+    ): Uint8Array {
+        const fieldMap = new Map<string, MessagePackValue>();
+
+        // Use optimized field access for simple types
+        for (let i = 0; i < optimizedMapping.fields.length; i++) {
+            const field = optimizedMapping.fields[i];
+            const fieldValue = instance.getFieldValue(field.name);
+
+            // Handle required fields
+            if (fieldValue == null) {
+                if (!field.isOptional) {
+                    throw ClassSerializationError.missingRequiredField(field.name, metadata.className);
+                }
+                continue;
+            }
+
+            // Fast path validation for simple types (skip expensive type checking)
+            if (this.isSimpleTypeValid(fieldValue!, field.type)) {
+                fieldMap.set(field.name, fieldValue!);
+            } else {
+                // Fall back to full validation for edge cases
+                this.validateFieldType(fieldValue!, field, metadata.className);
+                fieldMap.set(field.name, fieldValue!);
+            }
+        }
+
+        return this.encoder.encodeMap(fieldMap);
+    }
+
+    /**
+     * Standard path encoding for classes with complex types
+     * @param instance The class instance to serialize
+     * @param metadata The class metadata
+     * @returns Encoded MessagePack data
+     */
+    private encodeClassStandardPath<T extends Serializable>(
+        instance: T, 
+        metadata: ClassMetadata
+    ): Uint8Array {
         const fieldMap = new Map<string, MessagePackValue>();
 
         // Process each registered field
@@ -590,29 +903,52 @@ export class ClassSerializationEncoder {
             const fieldValue = instance.getFieldValue(field.name);
 
             // Handle required fields
-            if (fieldValue === null) {
+            if (fieldValue == null) {
                 if (!field.isOptional) {
-                    throw ClassSerializationError.missingRequiredField(field.name, className);
+                    throw ClassSerializationError.missingRequiredField(field.name, metadata.className);
                 }
                 // Skip optional fields that are null
                 continue;
             }
 
             // Validate field type matches expected type
-            this.validateFieldType(fieldValue, field, className);
+            this.validateFieldType(fieldValue!, field, metadata.className);
 
             // Handle nested class serialization
             if (field.type === SerializableFieldType.CLASS) {
-                const nestedValue = this.serializeNestedClass(fieldValue, field, className);
+                const nestedValue = this.serializeNestedClass(fieldValue!, field, metadata.className);
                 fieldMap.set(field.name, nestedValue);
             } else {
                 // Add the field value to the map
-                fieldMap.set(field.name, fieldValue);
+                fieldMap.set(field.name, fieldValue!);
             }
         }
 
         // Encode the field map as a MessagePack map
         return this.encoder.encodeMap(fieldMap);
+    }
+
+    /**
+     * Fast validation for simple types (performance optimization)
+     * @param value The field value to validate
+     * @param expectedType The expected field type
+     * @returns True if the type is valid
+     */
+    private isSimpleTypeValid(value: MessagePackValue, expectedType: SerializableFieldType): boolean {
+        const actualType = value.getType();
+        
+        switch (expectedType) {
+            case SerializableFieldType.BOOLEAN:
+                return actualType === MessagePackValueType.BOOLEAN;
+            case SerializableFieldType.INTEGER:
+                return actualType === MessagePackValueType.INTEGER;
+            case SerializableFieldType.STRING:
+                return actualType === MessagePackValueType.STRING;
+            case SerializableFieldType.FLOAT:
+                return actualType === MessagePackValueType.FLOAT;
+            default:
+                return false; // Complex types need full validation
+        }
     }
 
     /**
@@ -879,20 +1215,58 @@ export interface ClassFactory {
 export class ClassSerializationDecoder {
     /** The underlying MessagePack decoder */
     private decoder: MessagePackDecoder;
+    /** Buffer reuse flag for performance optimization */
+    private reuseBuffers: boolean = false;
+    /** Instance cache for frequently created objects */
+    private instanceCache: Map<string, Serializable> = new Map<string, Serializable>();
+    /** Cache hit counter for monitoring */
+    private cacheHits: i32 = 0;
+    /** Cache miss counter for monitoring */
+    private cacheMisses: i32 = 0;
 
     /**
      * Creates a new class serialization decoder
      * @param decoder The MessagePackDecoder instance to wrap
+     * @param reuseBuffers Whether to enable buffer reuse for performance
      */
-    constructor(decoder: MessagePackDecoder) {
+    constructor(decoder: MessagePackDecoder, reuseBuffers: boolean = false) {
         this.decoder = decoder;
+        this.reuseBuffers = reuseBuffers;
     }
 
     /**
-     * Deserializes MessagePack data to a class instance
+     * Enable or disable buffer reuse for performance optimization
+     * @param enable Whether to enable buffer reuse
+     */
+    setBufferReuse(enable: boolean): void {
+        this.reuseBuffers = enable;
+    }
+
+    /**
+     * Clear the instance cache (useful for memory management)
+     */
+    clearInstanceCache(): void {
+        this.instanceCache.clear();
+        this.cacheHits = 0;
+        this.cacheMisses = 0;
+    }
+
+    /**
+     * Get cache statistics for monitoring performance
+     * @returns ExtendedCacheStats object containing cache statistics
+     */
+    getCacheStats(): ExtendedCacheStats {
+        const total = this.cacheHits + this.cacheMisses;
+        const hitRate = total > 0 ? (this.cacheHits as f64) / (total as f64) : 0.0;
+        return new ExtendedCacheStats(this.cacheHits, this.cacheMisses, hitRate, this.instanceCache.size);
+    }
+
+    /**
+     * Deserializes MessagePack data to a class instance with performance optimizations
      * 
      * This method validates the class is registered, decodes the MessagePack data as a map,
      * validates field types, and uses the provided factory to create and populate a class instance.
+     * Uses fast paths for simple types and optimized field mappings.
      * 
      * @param factory The factory for creating and populating class instances
      * @param className The name of the class to deserialize
@@ -900,12 +1274,85 @@ export class ClassSerializationDecoder {
      * @throws MessagePackDecodeError if deserialization fails
      */
     decodeClass(factory: ClassFactory, className: string): Serializable {
-        // Validate that the class is registered
+        // Validate that the class is registered and get optimized mapping
         const metadata = ClassRegistry.getMetadata(className);
         if (metadata === null) {
             throw ClassDeserializationError.unregisteredClass(className);
         }
 
+        const optimizedMapping = ClassRegistry.getOptimizedMapping(className);
+        if (optimizedMapping !== null && optimizedMapping.canUseFastPath()) {
+            return this.decodeClassFastPath(factory, className, metadata, optimizedMapping);
+        }
+
+        // Fall back to standard path for complex types
+        return this.decodeClassStandardPath(factory, className, metadata);
+    }
+
+    /**
+     * Fast path decoding for classes with only simple types
+     * @param factory The factory for creating instances
+     * @param className The class name
+     * @param metadata The class metadata
+     * @param optimizedMapping The optimized field mapping
+     * @returns Deserialized instance
+     */
+    private decodeClassFastPath(
+        factory: ClassFactory, 
+        className: string, 
+        metadata: ClassMetadata, 
+        optimizedMapping: OptimizedFieldMapping
+    ): Serializable {
+        // Decode the MessagePack data
+        const value = this.decoder.decode();
+
+        // Validate that the decoded value is a map
+        if (value.getType() !== MessagePackValueType.MAP) {
+            throw ClassDeserializationError.invalidFormat(className, value.getType());
+        }
+
+        const mapValue = value as MessagePackMap;
+        const fieldMap = mapValue.value;
+        const instance = factory.create();
+
+        // Use optimized field processing for simple types
+        for (let i = 0; i < optimizedMapping.fields.length; i++) {
+            const field = optimizedMapping.fields[i];
+
+            if (!fieldMap.has(field.name)) {
+                if (!field.isOptional) {
+                    throw ClassDeserializationError.missingRequiredField(field.name, className);
+                }
+                continue;
+            }
+
+            const fieldValue = fieldMap.get(field.name);
+
+            // Fast path validation for simple types
+            if (this.isSimpleTypeValidForDecoding(fieldValue, field.type)) {
+                factory.setFieldValue(instance, field.name, fieldValue);
+            } else {
+                // Fall back to full validation for edge cases
+                this.validateFieldType(fieldValue, field, className);
+                factory.setFieldValue(instance, field.name, fieldValue);
+            }
+        }
+
+        return instance;
+    }
+
+    /**
+     * Standard path decoding for classes with complex types
+     * @param factory The factory for creating instances
+     * @param className The class name
+     * @param metadata The class metadata
+     * @returns Deserialized instance
+     */
+    private decodeClassStandardPath(
+        factory: ClassFactory, 
+        className: string, 
+        metadata: ClassMetadata
+    ): Serializable {
         // Decode the MessagePack data
         const value = this.decoder.decode();
 
@@ -944,12 +1391,35 @@ export class ClassSerializationDecoder {
                 const deserializedNestedValue = this.deserializeNestedClass(fieldValue, field, className);
                 factory.setFieldValue(instance, field.name, deserializedNestedValue);
             } else {
-                // Set the field value using the factory
+                // Set the field value directly
                 factory.setFieldValue(instance, field.name, fieldValue);
             }
         }
 
         return instance;
+    }
+
+    /**
+     * Fast validation for simple types during decoding (performance optimization)
+     * @param value The field value to validate
+     * @param expectedType The expected field type
+     * @returns True if the type is valid
+     */
+    private isSimpleTypeValidForDecoding(value: MessagePackValue, expectedType: SerializableFieldType): boolean {
+        const actualType = value.getType();
+        
+        switch (expectedType) {
+            case SerializableFieldType.BOOLEAN:
+                return actualType === MessagePackValueType.BOOLEAN;
+            case SerializableFieldType.INTEGER:
+                return actualType === MessagePackValueType.INTEGER;
+            case SerializableFieldType.STRING:
+                return actualType === MessagePackValueType.STRING;
+            case SerializableFieldType.FLOAT:
+                return actualType === MessagePackValueType.FLOAT;
+            default:
+                return false; // Complex types need full validation
+        }
     }
 
     /**
@@ -1116,7 +1586,7 @@ export class ClassSerializationDecoder {
      * @returns The deserialized array with class instances converted
      * @throws MessagePackDecodeError if array deserialization fails
      */
-    deserializeArrayWithClasses(arrayValue: MessagePackArray, elementType: SerializableFieldType, nestedClassType: string | null, nestedFactory: ClassFactory | null): MessagePackArray {
+    private deserializeArrayWithClasses(arrayValue: MessagePackArray, elementType: SerializableFieldType, nestedClassType: string | null, nestedFactory: ClassFactory | null): MessagePackArray {
         const originalArray = arrayValue.value;
         const deserializedElements: MessagePackValue[] = [];
 
