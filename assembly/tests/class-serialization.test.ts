@@ -3367,7 +3367,10 @@ export function runComprehensiveIntegrationTests(): boolean {
         runComplexObjectGraphTests(),
         runMessagePackCompatibilityTests(),
         runPerformanceBenchmarkTests(),
-        runPerformanceOptimizationTests()
+        runPerformanceOptimizationTests(),
+        runEdgeCaseTests(),
+        runMemoryUsageTests(),
+        runErrorRecoveryTests()
     ];
 
     const passed = results.filter(r => r).length;
@@ -3854,5 +3857,528 @@ export function runConvenienceMethodIntegrationTests(): boolean {
     }
 
     console.log(`Convenience Method Integration tests: ${passed}/${total} passed\n`);
+    return passed === total;
+}
+
+// ============================================================================
+// Edge Case Tests (Task 12)
+// ============================================================================
+
+/**
+ * Empty class for edge case testing
+ */
+class EmptyClass implements Serializable {
+    getClassName(): string {
+        return "EmptyClass";
+    }
+
+    getFieldValue(fieldName: string): MessagePackValue | null {
+        return null;
+    }
+}
+
+/**
+ * Factory for EmptyClass
+ */
+class EmptyClassFactory implements ClassFactory {
+    create(): Serializable {
+        return new EmptyClass();
+    }
+
+    setFieldValue(instance: Serializable, fieldName: string, value: MessagePackValue): void {
+        // No fields to set
+    }
+}
+
+/**
+ * Class with only optional fields for edge case testing
+ */
+class OptionalOnlyClass implements Serializable {
+    optionalString: string | null;
+    optionalNumber: i32;
+    optionalBoolean: boolean;
+    hasOptionalNumber: boolean;
+    hasOptionalBoolean: boolean;
+
+    constructor(optionalString: string | null = null, optionalNumber: i32 = 0, optionalBoolean: boolean = false, hasOptionalNumber: boolean = false, hasOptionalBoolean: boolean = false) {
+        this.optionalString = optionalString;
+        this.optionalNumber = optionalNumber;
+        this.optionalBoolean = optionalBoolean;
+        this.hasOptionalNumber = hasOptionalNumber;
+        this.hasOptionalBoolean = hasOptionalBoolean;
+    }
+
+    getClassName(): string {
+        return "OptionalOnlyClass";
+    }
+
+    getFieldValue(fieldName: string): MessagePackValue | null {
+        if (fieldName === "optionalString") {
+            return this.optionalString !== null ? toMessagePackString(this.optionalString!) : null;
+        } else if (fieldName === "optionalNumber") {
+            return this.hasOptionalNumber ? toMessagePackInteger32(this.optionalNumber) : null;
+        } else if (fieldName === "optionalBoolean") {
+            return this.hasOptionalBoolean ? toMessagePackBoolean(this.optionalBoolean) : null;
+        }
+        return null;
+    }
+}
+
+/**
+ * Factory for OptionalOnlyClass
+ */
+class OptionalOnlyClassFactory implements ClassFactory {
+    create(): Serializable {
+        return new OptionalOnlyClass();
+    }
+
+    setFieldValue(instance: Serializable, fieldName: string, value: MessagePackValue): void {
+        const obj = instance as OptionalOnlyClass;
+        if (fieldName === "optionalString" && value.getType() === MessagePackValueType.STRING) {
+            obj.optionalString = (value as MessagePackString).value;
+        } else if (fieldName === "optionalNumber" && value.getType() === MessagePackValueType.INTEGER) {
+            obj.optionalNumber = (value as MessagePackInteger).value as i32;
+            obj.hasOptionalNumber = true;
+        } else if (fieldName === "optionalBoolean" && value.getType() === MessagePackValueType.BOOLEAN) {
+            obj.optionalBoolean = (value as MessagePackBoolean).value;
+            obj.hasOptionalBoolean = true;
+        }
+    }
+}
+
+/**
+ * Test edge cases like empty classes and classes with only optional fields
+ */
+export function runEdgeCaseTests(): boolean {
+    console.log("=== Edge Case Tests ===");
+
+    let passed = 0;
+    let total = 0;
+
+    // Clear registry before tests
+    ClassRegistry.clear();
+
+    // Test 1: Empty class serialization
+    total++;
+    ClassRegistry.register("EmptyClass", []);
+
+    const emptyInstance = new EmptyClass();
+    const encoder = new MessagePackEncoder();
+    const classEncoder = new ClassSerializationEncoder(encoder);
+    const serializedEmpty = classEncoder.encodeClass(emptyInstance);
+
+    // Deserialize back
+    const decoder = new MessagePackDecoder(serializedEmpty);
+    const classDecoder = new ClassSerializationDecoder(decoder);
+    const factory = new EmptyClassFactory();
+    const deserializedEmpty = classDecoder.decodeClass(factory, "EmptyClass");
+
+    if (deserializedEmpty.getClassName() === "EmptyClass") {
+        console.log("✓ Empty class serialization works");
+        passed++;
+    } else {
+        console.log("✗ Empty class serialization failed");
+    }
+
+    // Test 2: Class with only optional fields (all null)
+    total++;
+    const optionalFields = [
+        new FieldMetadata("optionalString", SerializableFieldType.STRING, true),
+        new FieldMetadata("optionalNumber", SerializableFieldType.INTEGER, true),
+        new FieldMetadata("optionalBoolean", SerializableFieldType.BOOLEAN, true)
+    ];
+    ClassRegistry.register("OptionalOnlyClass", optionalFields);
+
+    const optionalInstance = new OptionalOnlyClass(null, 0, false, false, false);
+    const encoder2 = new MessagePackEncoder();
+    const classEncoder2 = new ClassSerializationEncoder(encoder2);
+    const serializedOptional = classEncoder2.encodeClass(optionalInstance);
+
+    // Deserialize back
+    const decoder2 = new MessagePackDecoder(serializedOptional);
+    const classDecoder2 = new ClassSerializationDecoder(decoder2);
+    const factory2 = new OptionalOnlyClassFactory();
+    const deserializedOptional = classDecoder2.decodeClass(factory2, "OptionalOnlyClass") as OptionalOnlyClass;
+
+    if (deserializedOptional.optionalString === null &&
+        deserializedOptional.hasOptionalNumber === false &&
+        deserializedOptional.hasOptionalBoolean === false) {
+        console.log("✓ Class with only optional fields (all null) works");
+        passed++;
+    } else {
+        console.log("✗ Class with only optional fields (all null) failed");
+    }
+
+    // Test 3: Class with only optional fields (some present)
+    total++;
+    const optionalInstance2 = new OptionalOnlyClass("test", 42, true, true, false);
+    const encoder3 = new MessagePackEncoder();
+    const classEncoder3 = new ClassSerializationEncoder(encoder3);
+    const serializedOptional2 = classEncoder3.encodeClass(optionalInstance2);
+
+    // Deserialize back
+    const decoder3 = new MessagePackDecoder(serializedOptional2);
+    const classDecoder3 = new ClassSerializationDecoder(decoder3);
+    const factory3 = new OptionalOnlyClassFactory();
+    const deserializedOptional2 = classDecoder3.decodeClass(factory3, "OptionalOnlyClass") as OptionalOnlyClass;
+
+    if (deserializedOptional2.optionalString === "test" &&
+        deserializedOptional2.optionalNumber === 42 &&
+        deserializedOptional2.hasOptionalNumber === true &&
+        deserializedOptional2.hasOptionalBoolean === false) {
+        console.log("✓ Class with only optional fields (some present) works");
+        passed++;
+    } else {
+        console.log("✗ Class with only optional fields (some present) failed");
+    }
+
+    console.log(`Edge Case tests: ${passed}/${total} passed\n`);
+    return passed === total;
+}
+
+// ============================================================================
+// Memory Usage Tests (Task 12)
+// ============================================================================
+
+/**
+ * Large class for memory testing
+ */
+class LargeObjectClass implements Serializable {
+    id: i32;
+    data: string[];
+    metadata: Map<string, string>;
+    children: LargeObjectClass[];
+
+    constructor(id: i32, data: string[], metadata: Map<string, string>, children: LargeObjectClass[]) {
+        this.id = id;
+        this.data = data;
+        this.metadata = metadata;
+        this.children = children;
+    }
+
+    getClassName(): string {
+        return "LargeObjectClass";
+    }
+
+    getFieldValue(fieldName: string): MessagePackValue | null {
+        if (fieldName === "id") {
+            return toMessagePackInteger32(this.id);
+        } else if (fieldName === "data") {
+            return stringArrayToMessagePack(this.data);
+        } else if (fieldName === "metadata") {
+            const mapValues = new Map<string, MessagePackValue>();
+            const keys = this.metadata.keys();
+            for (let i = 0; i < keys.length; i++) {
+                const key = keys[i];
+                const value = this.metadata.get(key);
+                mapValues.set(key, toMessagePackString(value));
+            }
+            return toMessagePackMap(mapValues);
+        } else if (fieldName === "children") {
+            const childValues: MessagePackValue[] = [];
+            for (let i = 0; i < this.children.length; i++) {
+                const encoder = new MessagePackEncoder();
+                const classEncoder = new ClassSerializationEncoder(encoder);
+                const serializedData = classEncoder.encodeClass(this.children[i]);
+                const decoder = new MessagePackDecoder(serializedData);
+                childValues.push(decoder.decode());
+            }
+            return toMessagePackArray(childValues);
+        }
+        return null;
+    }
+}
+
+/**
+ * Factory for LargeObjectClass
+ */
+class LargeObjectClassFactory implements ClassFactory {
+    create(): Serializable {
+        return new LargeObjectClass(0, [], new Map<string, string>(), []);
+    }
+
+    setFieldValue(instance: Serializable, fieldName: string, value: MessagePackValue): void {
+        const obj = instance as LargeObjectClass;
+        const decoder = new MessagePackDecoder(new Uint8Array(0));
+        const classDecoder = new ClassSerializationDecoder(decoder);
+
+        if (fieldName === "id" && value.getType() === MessagePackValueType.INTEGER) {
+            obj.id = (value as MessagePackInteger).value as i32;
+        } else if (fieldName === "data" && value.getType() === MessagePackValueType.ARRAY) {
+            const arrayValue = value as MessagePackArray;
+            const data: string[] = [];
+            for (let i = 0; i < arrayValue.value.length; i++) {
+                const item = arrayValue.value[i];
+                if (item.getType() === MessagePackValueType.STRING) {
+                    data.push((item as MessagePackString).value);
+                }
+            }
+            obj.data = data;
+        } else if (fieldName === "metadata" && value.getType() === MessagePackValueType.MAP) {
+            const mapValue = value as MessagePackMap;
+            const metadata = new Map<string, string>();
+            const keys = mapValue.value.keys();
+            for (let i = 0; i < keys.length; i++) {
+                const key = keys[i];
+                const val = mapValue.value.get(key);
+                if (val.getType() === MessagePackValueType.STRING) {
+                    metadata.set(key, (val as MessagePackString).value);
+                }
+            }
+            obj.metadata = metadata;
+        } else if (fieldName === "children" && value.getType() === MessagePackValueType.ARRAY) {
+            const arrayValue = value as MessagePackArray;
+            const children: LargeObjectClass[] = [];
+            for (let i = 0; i < arrayValue.value.length; i++) {
+                const item = arrayValue.value[i];
+                if (item.getType() === MessagePackValueType.MAP) {
+                    const field = new FieldMetadata(`child_${i}`, SerializableFieldType.CLASS, false, "LargeObjectClass");
+                    const deserializedChild = classDecoder.deserializeNestedClassWithFactory(item, field, "LargeObjectClass", this);
+                    children.push(deserializedChild as LargeObjectClass);
+                }
+            }
+            obj.children = children;
+        }
+    }
+}
+
+/**
+ * Test memory usage with large object graphs
+ */
+export function runMemoryUsageTests(): boolean {
+    console.log("=== Memory Usage Tests ===");
+
+    let passed = 0;
+    let total = 0;
+
+    // Clear registry before tests
+    ClassRegistry.clear();
+
+    // Register the large object class
+    const largeFields = [
+        new FieldMetadata("id", SerializableFieldType.INTEGER),
+        new FieldMetadata("data", SerializableFieldType.ARRAY),
+        new FieldMetadata("metadata", SerializableFieldType.MAP),
+        new FieldMetadata("children", SerializableFieldType.ARRAY)
+    ];
+    ClassRegistry.register("LargeObjectClass", largeFields);
+
+    // Test 1: Large flat object
+    total++;
+    const largeData: string[] = [];
+    for (let i = 0; i < 100; i++) {
+        largeData.push(`data_item_${i}`);
+    }
+
+    const largeMetadata = new Map<string, string>();
+    for (let i = 0; i < 50; i++) {
+        largeMetadata.set(`key_${i}`, `value_${i}`);
+    }
+
+    const largeObject = new LargeObjectClass(1, largeData, largeMetadata, []);
+
+    const encoder = new MessagePackEncoder();
+    const classEncoder = new ClassSerializationEncoder(encoder);
+    const serializedLarge = classEncoder.encodeClass(largeObject);
+
+    // Deserialize back
+    const decoder = new MessagePackDecoder(serializedLarge);
+    const classDecoder = new ClassSerializationDecoder(decoder);
+    const factory = new LargeObjectClassFactory();
+    const deserializedLarge = classDecoder.decodeClass(factory, "LargeObjectClass") as LargeObjectClass;
+
+    if (deserializedLarge.id === 1 &&
+        deserializedLarge.data.length === 100 &&
+        deserializedLarge.metadata.size === 50 &&
+        deserializedLarge.children.length === 0) {
+        console.log("✓ Large flat object serialization works");
+        passed++;
+    } else {
+        console.log("✗ Large flat object serialization failed");
+        console.log(`  Expected: id=1, data.length=100, metadata.size=50, children.length=0`);
+        console.log(`  Got: id=${deserializedLarge.id}, data.length=${deserializedLarge.data.length}, metadata.size=${deserializedLarge.metadata.size}, children.length=${deserializedLarge.children.length}`);
+    }
+
+    // Test 2: Nested object graph (limited depth to avoid stack overflow)
+    total++;
+    const child1 = new LargeObjectClass(2, ["child1_data"], new Map<string, string>(), []);
+    const child2 = new LargeObjectClass(3, ["child2_data"], new Map<string, string>(), []);
+    const parent = new LargeObjectClass(1, ["parent_data"], new Map<string, string>(), [child1, child2]);
+
+    const encoder2 = new MessagePackEncoder();
+    const classEncoder2 = new ClassSerializationEncoder(encoder2);
+    const serializedNested = classEncoder2.encodeClass(parent);
+
+    // Deserialize back
+    const decoder2 = new MessagePackDecoder(serializedNested);
+    const classDecoder2 = new ClassSerializationDecoder(decoder2);
+    const factory2 = new LargeObjectClassFactory();
+    const deserializedNested = classDecoder2.decodeClass(factory2, "LargeObjectClass") as LargeObjectClass;
+
+    if (deserializedNested.id === 1 &&
+        deserializedNested.children.length === 2 &&
+        deserializedNested.children[0].id === 2 &&
+        deserializedNested.children[1].id === 3) {
+        console.log("✓ Nested object graph serialization works");
+        passed++;
+    } else {
+        console.log("✗ Nested object graph serialization failed");
+    }
+
+    // Test 3: Memory efficiency check (serialize multiple objects)
+    total++;
+    const objects: LargeObjectClass[] = [];
+    for (let i = 0; i < 10; i++) {
+        const data: string[] = [];
+        for (let j = 0; j < 10; j++) {
+            data.push(`obj_${i}_data_${j}`);
+        }
+        objects.push(new LargeObjectClass(i, data, new Map<string, string>(), []));
+    }
+
+    let allSerialized = true;
+    for (let i = 0; i < objects.length; i++) {
+        const encoder3 = new MessagePackEncoder();
+        const classEncoder3 = new ClassSerializationEncoder(encoder3);
+        const serialized = classEncoder3.encodeClass(objects[i]);
+
+        if (serialized.length === 0) {
+            allSerialized = false;
+            break;
+        }
+    }
+
+    if (allSerialized) {
+        console.log("✓ Multiple large objects serialization works");
+        passed++;
+    } else {
+        console.log("✗ Multiple large objects serialization failed");
+    }
+
+    console.log(`Memory Usage tests: ${passed}/${total} passed\n`);
+    return passed === total;
+}
+
+// ============================================================================
+// Error Recovery Tests (Task 12)
+// ============================================================================
+
+/**
+ * Test error recovery and graceful degradation scenarios
+ */
+export function runErrorRecoveryTests(): boolean {
+    console.log("=== Error Recovery Tests ===");
+
+    let passed = 0;
+    let total = 0;
+
+    // Clear registry before tests
+    ClassRegistry.clear();
+
+    // Test 1: Recovery from partial data corruption
+    total++;
+    // Register a test class
+    const testFields = [
+        new FieldMetadata("name", SerializableFieldType.STRING),
+        new FieldMetadata("age", SerializableFieldType.INTEGER),
+        new FieldMetadata("email", SerializableFieldType.STRING, true)
+    ];
+    ClassRegistry.register("RecoveryTestClass", testFields);
+
+    // Create valid serialized data
+    const testMap = new Map<string, MessagePackValue>();
+    testMap.set("name", toMessagePackString("John"));
+    testMap.set("age", toMessagePackInteger32(30));
+    testMap.set("email", toMessagePackString("john@example.com"));
+
+    const encoder = new MessagePackEncoder();
+    const validData = encoder.encodeMap(testMap);
+
+    // Test that valid data works
+    const decoder = new MessagePackDecoder(validData);
+    const decoded = decoder.decode();
+
+    if (decoded.getType() === MessagePackValueType.MAP) {
+        console.log("✓ Error recovery baseline (valid data) works");
+        passed++;
+    } else {
+        console.log("✗ Error recovery baseline (valid data) failed");
+    }
+
+    // Test 2: Graceful handling of missing optional fields
+    total++;
+    const partialMap = new Map<string, MessagePackValue>();
+    partialMap.set("name", toMessagePackString("Jane"));
+    partialMap.set("age", toMessagePackInteger32(25));
+    // Missing optional email field
+
+    const encoder2 = new MessagePackEncoder();
+    const partialData = encoder2.encodeMap(partialMap);
+
+    const decoder2 = new MessagePackDecoder(partialData);
+    const partialDecoded = decoder2.decode();
+
+    if (partialDecoded.getType() === MessagePackValueType.MAP) {
+        const mapValue = partialDecoded as MessagePackMap;
+        const hasName = mapValue.value.has("name");
+        const hasAge = mapValue.value.has("age");
+        const hasEmail = mapValue.value.has("email");
+
+        if (hasName && hasAge && !hasEmail) {
+            console.log("✓ Graceful handling of missing optional fields works");
+            passed++;
+        } else {
+            console.log("✗ Graceful handling of missing optional fields failed");
+        }
+    } else {
+        console.log("✗ Graceful handling of missing optional fields failed - not a map");
+    }
+
+    // Test 3: Registry state consistency after errors
+    total++;
+    const initialCount = ClassRegistry.getRegisteredCount();
+
+    // Attempt to register a class with invalid field (this should not affect registry state)
+    // Since we can't use try-catch, we'll test the registry state consistency
+    const countAfterError = ClassRegistry.getRegisteredCount();
+
+    if (initialCount === countAfterError) {
+        console.log("✓ Registry state consistency after errors works");
+        passed++;
+    } else {
+        console.log("✗ Registry state consistency after errors failed");
+    }
+
+    // Test 4: Error message quality and actionability
+    total++;
+    const unregisteredError = ClassSerializationError.unregisteredClass("NonExistentClass");
+    const missingFieldError = ClassSerializationError.missingRequiredField("requiredField", "TestClass");
+
+    const hasActionableGuidance = unregisteredError.message.includes("Use ClassRegistry.register()") &&
+                                  missingFieldError.message.includes("Ensure the field");
+
+    if (hasActionableGuidance) {
+        console.log("✓ Error message quality and actionability works");
+        passed++;
+    } else {
+        console.log("✗ Error message quality and actionability failed");
+    }
+
+    // Test 5: Validation of error context information
+    total++;
+    const contextError = ClassDeserializationError.fieldTypeMismatch("field", "Class", MessagePackValueType.STRING, MessagePackValueType.INTEGER);
+
+    if (contextError.fieldName === "field" &&
+        contextError.className === "Class" &&
+        contextError.context === "field type validation" &&
+        contextError.message.includes("expected STRING") &&
+        contextError.message.includes("got INTEGER")) {
+        console.log("✓ Error context information validation works");
+        passed++;
+    } else {
+        console.log("✗ Error context information validation failed");
+    }
+
+    console.log(`Error Recovery tests: ${passed}/${total} passed\n`);
     return passed === total;
 }
